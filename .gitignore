@@ -86,3 +86,11 @@ secrets/
 
 # OS
 Thumbs.db
+
+# Swift / SwiftPM / Xcode
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
