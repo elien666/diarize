@@ -59,9 +59,16 @@ cat > "$CONTENTS/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "→ Ad-hoc code signing (so macOS can track permissions for this binary)"
-codesign --force --sign - --deep --options runtime --timestamp=none "$APP_DIR" 2>/dev/null || \
-    codesign --force --sign - --deep "$APP_DIR"
+SIGN_IDENTITY="Diarize Local Dev"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$SIGN_IDENTITY\""; then
+    echo "→ Code signing mit '$SIGN_IDENTITY' (stabile Identity → Permissions bleiben über Rebuilds)"
+    codesign --force --sign "$SIGN_IDENTITY" --deep --timestamp=none "$APP_DIR"
+else
+    echo "⚠ Keine stabile Identity '$SIGN_IDENTITY' im Keychain gefunden — fallback auf ad-hoc."
+    echo "   macOS-Permissions werden bei jedem Rebuild zurückgesetzt."
+    echo "   Tipp: ./Scripts/setup-signing-identity.sh ausführen für stabile Permissions."
+    codesign --force --sign - --deep --timestamp=none "$APP_DIR"
+fi
 
 echo "✓ Built $APP_DIR"
 
