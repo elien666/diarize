@@ -17,6 +17,9 @@ RES="$CONTENTS/Resources"
 BUNDLE_ID="de.tty7.diarize"
 EXECUTABLE_NAME="Diarize"
 
+echo "→ Build icon"
+"$ROOT_DIR/Scripts/build-icon.sh"
+
 echo "→ swift build (release)"
 cd "$ROOT_DIR"
 swift build -c release --product diarize-app
@@ -32,6 +35,11 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RES"
 cp "$BIN" "$MACOS/$EXECUTABLE_NAME"
 chmod +x "$MACOS/$EXECUTABLE_NAME"
+
+ICON_SRC="$ROOT_DIR/Resources/icon/Diarize.icns"
+if [[ -f "$ICON_SRC" ]]; then
+    cp "$ICON_SRC" "$RES/Diarize.icns"
+fi
 
 cat > "$CONTENTS/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -49,6 +57,8 @@ cat > "$CONTENTS/Info.plist" <<EOF
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleIconFile</key><string>Diarize</string>
+    <key>CFBundleIconName</key><string>Diarize</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Diarize nimmt dein Mikrofon für Meeting-Aufnahmen auf, die lokal transkribiert und archiviert werden.</string>
     <key>NSScreenCaptureUsageDescription</key>
