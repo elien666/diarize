@@ -51,5 +51,39 @@ enum Migrations {
             }
             try db.create(index: "idx_rec_source_hash", on: "recordings", columns: ["sourceHash"])
         }
+
+        migrator.registerMigration("v3_segments_fts") { db in
+            // External-content FTS5 mirroring recording_segments. We populate it on
+            // insert/update/delete via triggers. unicode61 with diacritic-stripping is a
+            // good default for German+English.
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE recording_segments_fts USING fts5(
+                    text,
+                    content='recording_segments',
+                    content_rowid='id',
+                    tokenize='unicode61 remove_diacritics 2'
+                );
+            """)
+            try db.execute(sql: """
+                INSERT INTO recording_segments_fts(rowid, text)
+                SELECT id, text FROM recording_segments;
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER recording_segments_ai AFTER INSERT ON recording_segments BEGIN
+                    INSERT INTO recording_segments_fts(rowid, text) VALUES (new.id, new.text);
+                END;
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER recording_segments_ad AFTER DELETE ON recording_segments BEGIN
+                    INSERT INTO recording_segments_fts(recording_segments_fts, rowid, text) VALUES('delete', old.id, old.text);
+                END;
+            """)
+            try db.execute(sql: """
+                CREATE TRIGGER recording_segments_au AFTER UPDATE ON recording_segments BEGIN
+                    INSERT INTO recording_segments_fts(recording_segments_fts, rowid, text) VALUES('delete', old.id, old.text);
+                    INSERT INTO recording_segments_fts(rowid, text) VALUES (new.id, new.text);
+                END;
+            """)
+        }
     }
 }
