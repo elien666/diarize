@@ -158,6 +158,14 @@ public final class SpeakerStore: @unchecked Sendable {
         try dbQueue.write { db in
             var r = recording
             try r.insert(db)
+            // Belt-and-suspenders: GRDB Codable encoding has historically dropped
+            // late-added optional fields in some setups. Set sourceHash explicitly.
+            if let hash = recording.sourceHash {
+                try db.execute(
+                    sql: "UPDATE recordings SET sourceHash = ? WHERE id = ?",
+                    arguments: [hash, recording.id]
+                )
+            }
             for seg in segments {
                 var s = seg
                 try s.insert(db)
@@ -193,6 +201,34 @@ public final class SpeakerStore: @unchecked Sendable {
     public func deleteRecording(id: String) throws {
         try dbQueue.write { db in
             _ = try Recording.deleteOne(db, key: id)
+        }
+    }
+
+    public func setSourceHash(recordingId: String, hash: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE recordings SET sourceHash = ? WHERE id = ?",
+                arguments: [hash, recordingId]
+            )
+        }
+    }
+
+    /// Returns groups of recordings that share a sourceHash, sorted newest first within each group.
+    /// Only groups with ≥ 2 recordings are returned.
+    public func duplicateRecordings() throws -> [(hash: String, recordings: [Recording])] {
+        try dbQueue.read { db in
+            let recs = try Recording.filter(Column("sourceHash") != nil)
+                .order(Column("createdAt").desc)
+                .fetchAll(db)
+            var grouped: [String: [Recording]] = [:]
+            for r in recs {
+                guard let h = r.sourceHash else { continue }
+                grouped[h, default: []].append(r)
+            }
+            return grouped
+                .filter { $0.value.count >= 2 }
+                .map { ($0.key, $0.value) }
+                .sorted { $0.recordings.first!.createdAt > $1.recordings.first!.createdAt }
         }
     }
 

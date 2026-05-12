@@ -49,6 +49,7 @@ public final class TranscribePipeline {
 
         progress.step("Berechne Source-Hash …")
         let hash = try AudioHasher.sha256(of: audioPath)
+        progress.step("Hash: \(String(hash.prefix(12))) …")
 
         if duplicatePolicy == .skip, let existing = try store.recording(sourceHash: hash) {
             progress.step("Bereits transkribiert (\(existing.id)) — überspringe. Erneut mit --force erzwingen.")

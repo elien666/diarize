@@ -6,7 +6,7 @@ struct ArchiveCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "archive",
         abstract: "Verwaltet das Aufnahme-Archiv.",
-        subcommands: [List.self, Show.self, Reprocess.self, ReprocessAll.self]
+        subcommands: [List.self, Show.self, Reprocess.self, ReprocessAll.self, Backfill.self, Dedupe.self, Delete.self]
     )
 
     struct List: ParsableCommand {
@@ -93,6 +93,84 @@ struct ArchiveCommand: AsyncParsableCommand {
                 print("  ✓ \(r.id)  \(r.title ?? "—")")
             }
             print("Fertig.")
+        }
+    }
+
+    struct Backfill: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "backfill-hashes",
+            abstract: "Berechnet sourceHash für alle Aufnahmen, denen er fehlt (nach Migration / altem Bug)."
+        )
+
+        func run() throws {
+            let config = AppConfigLoader.load()
+            try config.ensureDirectories()
+            let store = try SpeakerStore(path: config.databasePath)
+            var fixed = 0, missing = 0
+            for r in try store.allRecordings() where r.sourceHash == nil {
+                let url = URL(fileURLWithPath: r.sourcePath)
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    print("⚠ Quelle fehlt für \(r.id): \(r.sourcePath)")
+                    missing += 1
+                    continue
+                }
+                let hash = try AudioHasher.sha256(of: url)
+                try store.setSourceHash(recordingId: r.id, hash: hash)
+                print("✓ \(r.id) → \(String(hash.prefix(12)))…")
+                fixed += 1
+            }
+            print("Fertig. \(fixed) Hashes nachgetragen, \(missing) Quellen fehlten.")
+        }
+    }
+
+    struct Dedupe: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "dedupe",
+            abstract: "Findet doppelte Aufnahmen (gleicher sourceHash) und löscht alle bis auf die jüngste pro Hash."
+        )
+        @Flag(name: .long, help: "Nur anzeigen, nichts löschen.")
+        var dryRun: Bool = false
+
+        func run() throws {
+            let config = AppConfigLoader.load()
+            try config.ensureDirectories()
+            let store = try SpeakerStore(path: config.databasePath)
+            let groups = try store.duplicateRecordings()
+            if groups.isEmpty {
+                print("Keine Duplikate gefunden.")
+                return
+            }
+            for (hash, recs) in groups {
+                let keep = recs.first!
+                let drop = Array(recs.dropFirst())
+                print("Hash \(String(hash.prefix(12)))…  behalte \(keep.id) (\(keep.createdAt))")
+                for d in drop {
+                    print("  ✗ \(d.id) (\(d.createdAt))")
+                    if !dryRun {
+                        try store.deleteRecording(id: d.id)
+                    }
+                }
+            }
+            if dryRun { print("(dry-run — nichts gelöscht. Erneut ohne --dry-run ausführen.)") }
+        }
+    }
+
+    struct Delete: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "delete",
+            abstract: "Löscht eine Aufnahme aus dem Archiv (Quell-Datei bleibt unangetastet)."
+        )
+        @Argument var recordingId: String
+
+        func run() throws {
+            let config = AppConfigLoader.load()
+            try config.ensureDirectories()
+            let store = try SpeakerStore(path: config.databasePath)
+            guard try store.recording(id: recordingId) != nil else {
+                throw ValidationError("Aufnahme '\(recordingId)' nicht gefunden.")
+            }
+            try store.deleteRecording(id: recordingId)
+            print("✓ \(recordingId) gelöscht.")
         }
     }
 }

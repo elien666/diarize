@@ -30,6 +30,9 @@ struct RecordingDetailView: View {
         }
         .onChange(of: recording.id) { _, _ in
             reload()
+            // Reset to start even if it's the same audio file (different recording entry).
+            player.pause()
+            player.seek(to: 0)
             loadAudioIfNeeded()
             consumePendingJump()
         }
