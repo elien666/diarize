@@ -6,7 +6,7 @@ struct ArchiveCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "archive",
         abstract: "Verwaltet das Aufnahme-Archiv.",
-        subcommands: [List.self, Show.self]
+        subcommands: [List.self, Show.self, Reprocess.self, ReprocessAll.self]
     )
 
     struct List: ParsableCommand {
@@ -53,6 +53,46 @@ struct ArchiveCommand: AsyncParsableCommand {
             print("Dauer:     \(MarkdownTimeFormatter.duration(r.durationSec))")
             print("Markdown:  \(r.transcriptMd)")
             print("JSON:      \(r.transcriptJson)")
+        }
+    }
+
+    struct Reprocess: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reprocess",
+            abstract: "Rendert Markdown + JSON einer Aufnahme neu mit den aktuellen Sprecher-Labels (kein Modell-Lauf)."
+        )
+        @Argument var recordingId: String
+
+        func run() throws {
+            let config = AppConfigLoader.load()
+            try config.ensureDirectories()
+            let store = try SpeakerStore(path: config.databasePath)
+            let pipeline = TranscribePipeline(config: config, store: store)
+            let result = try pipeline.rerender(recordingId: recordingId)
+            print("✓ \(result.recording.id) neu gerendert.")
+            print("  Markdown: \(result.markdownPath.path)")
+            print("  JSON:     \(result.jsonPath.path)")
+        }
+    }
+
+    struct ReprocessAll: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "reprocess-all",
+            abstract: "Rendert ALLE archivierten Aufnahmen neu mit aktuellen Sprecher-Labels."
+        )
+
+        func run() throws {
+            let config = AppConfigLoader.load()
+            try config.ensureDirectories()
+            let store = try SpeakerStore(path: config.databasePath)
+            let pipeline = TranscribePipeline(config: config, store: store)
+            let recs = try store.allRecordings()
+            print("Rendere \(recs.count) Aufnahmen neu …")
+            for r in recs {
+                _ = try pipeline.rerender(recordingId: r.id)
+                print("  ✓ \(r.id)  \(r.title ?? "—")")
+            }
+            print("Fertig.")
         }
     }
 }

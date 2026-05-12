@@ -6,7 +6,7 @@ struct SpeakersCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "speakers",
         abstract: "Verwaltet die Sprecher-Bibliothek.",
-        subcommands: [List.self, Label.self, Show.self, Merge.self, Delete.self]
+        subcommands: [List.self, Label.self, Show.self, Merge.self, Delete.self, Recalibrate.self]
     )
 
     struct List: ParsableCommand {
@@ -80,6 +80,50 @@ struct SpeakersCommand: AsyncParsableCommand {
             guard try store.speaker(id: into) != nil else { throw ValidationError("Ziel '\(into)' nicht gefunden.") }
             try store.mergeSpeakers(from: from, into: into)
             print("✓ \(from) → \(into) zusammengeführt.")
+        }
+    }
+
+    struct Recalibrate: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "recalibrate",
+            abstract: "Berechnet einen empfohlenen Similarity-Threshold aus deinen gelabelten Sprechern."
+        )
+
+        @Flag(name: .long, help: "Setzt den empfohlenen Wert direkt in ~/.config/diarize/config.json.")
+        var apply: Bool = false
+
+        func run() throws {
+            let config = AppConfigLoader.load()
+            try config.ensureDirectories()
+            let store = try SpeakerStore(path: config.databasePath)
+            guard let result = try ThresholdCalibrator.calibrate(store: store) else {
+                print("Nicht genug gelabelte Sprecher für Kalibrierung — labele zuerst mindestens 2 Sprecher mit je ≥1 Embedding.")
+                return
+            }
+
+            print("Aktueller Threshold:    \(config.similarityThreshold)")
+            print("Gelabelte Sprecher:     \(result.labeledSpeakers)")
+            print(String(format: "Intra-Speaker:          mean=%.3f  min=%.3f  (sollte hoch sein)", result.intraSpeakerMean, result.intraSpeakerMin))
+            print(String(format: "Inter-Speaker:          mean=%.3f  max=%.3f  (sollte niedrig sein)", result.interSpeakerMean, result.interSpeakerMax))
+            print("Konfidenz:              \(result.confidence.rawValue)")
+            print(String(format: "Empfohlener Threshold:  %.3f", result.recommendedThreshold))
+
+            if apply {
+                let configFile = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".config/diarize/config.json")
+                try FileManager.default.createDirectory(at: configFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+                var json: [String: Any] = [:]
+                if let data = try? Data(contentsOf: configFile),
+                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    json = obj
+                }
+                json["similarity.threshold"] = String(format: "%.3f", result.recommendedThreshold)
+                let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: configFile)
+                print("✓ in \(configFile.path) gespeichert.")
+            } else {
+                print("Tipp: erneut mit --apply ausführen, um den Wert dauerhaft zu setzen.")
+            }
         }
     }
 

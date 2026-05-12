@@ -20,6 +20,9 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Override Archiv-Pfad.")
     var archive: String?
 
+    @Flag(name: .long, help: "Audiodatei erneut verarbeiten, auch wenn der Source-Hash bereits archiviert ist.")
+    var force: Bool = false
+
     func run() async throws {
         var config = AppConfigLoader.load()
         if let archive { config.archivePath = URL(fileURLWithPath: (archive as NSString).expandingTildeInPath) }
@@ -38,7 +41,19 @@ struct TranscribeCommand: AsyncParsableCommand {
         let store = try SpeakerStore(path: config.databasePath)
         let pipeline = TranscribePipeline(config: config, store: store)
         let url = URL(fileURLWithPath: (audio as NSString).expandingTildeInPath)
-        let result = try await pipeline.run(audioPath: url, title: title, language: language)
+        let result = try await pipeline.run(
+            audioPath: url,
+            title: title,
+            language: language,
+            duplicatePolicy: force ? .force : .skip
+        )
+
+        if result.skipped {
+            print("↺ Übersprungen — Aufnahme \(result.recording.id) existiert bereits.")
+            print("  Markdown: \(result.markdownPath.path)")
+            print("  Tipp: 'diarize transcribe … --force' überschreibt; 'diarize archive reprocess <id>' rendert nur neu.")
+            return
+        }
 
         print("✓ Aufnahme: \(result.recording.id)")
         print("  Markdown: \(result.markdownPath.path)")

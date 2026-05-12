@@ -44,5 +44,12 @@ enum Migrations {
             }
             try db.create(index: "idx_seg_recording", on: "recording_segments", columns: ["recordingId"])
         }
+
+        migrator.registerMigration("v2_recording_source_hash") { db in
+            try db.alter(table: "recordings") { t in
+                t.add(column: "sourceHash", .text)
+            }
+            try db.create(index: "idx_rec_source_hash", on: "recordings", columns: ["sourceHash"])
+        }
     }
 }
