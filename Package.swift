@@ -8,6 +8,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "diarize", targets: ["DiarizeCLI"]),
+        .executable(name: "diarize-app", targets: ["DiarizeApp"]),
         .library(name: "DiarizeCore", targets: ["DiarizeCore"]),
     ],
     dependencies: [
@@ -23,6 +24,11 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Sources/DiarizeCLI"
+        ),
+        .executableTarget(
+            name: "DiarizeApp",
+            dependencies: ["DiarizeCore"],
+            path: "Sources/DiarizeApp"
         ),
         .target(
             name: "DiarizeCore",

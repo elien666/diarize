@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public final class SpeakerStore {
+public final class SpeakerStore: @unchecked Sendable {
     public let dbQueue: DatabaseQueue
 
     public init(path: URL) throws {
