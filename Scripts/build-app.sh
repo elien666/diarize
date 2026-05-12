@@ -14,7 +14,7 @@ APP_DIR="$BUILD_DIR/Diarize.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RES="$CONTENTS/Resources"
-BUNDLE_ID="eu.tty7.diarize"
+BUNDLE_ID="de.tty7.diarize"
 EXECUTABLE_NAME="Diarize"
 
 echo "→ swift build (release)"
