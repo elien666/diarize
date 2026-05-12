@@ -8,6 +8,7 @@ public struct TranscribeOutput: Sendable {
     public let jsonPath: URL
     public let newSpeakerIds: [String]
     public let matchedSpeakerIds: [String]
+    public let skipped: Bool        // true if existing recording with same hash was returned
 }
 
 public protocol ProgressReporter: AnyObject {
@@ -22,6 +23,11 @@ public final class ConsoleProgress: ProgressReporter {
 }
 
 public final class TranscribePipeline {
+    public enum DuplicatePolicy: Sendable {
+        case skip       // return existing recording, do nothing
+        case force      // ignore existing, transcribe again
+    }
+
     private let config: AppConfig
     private let store: SpeakerStore
     private let progress: ProgressReporter
@@ -32,9 +38,31 @@ public final class TranscribePipeline {
         self.progress = progress
     }
 
-    public func run(audioPath: URL, title: String?, language: AppConfig.Language?) async throws -> TranscribeOutput {
+    public func run(
+        audioPath: URL,
+        title: String?,
+        language: AppConfig.Language?,
+        duplicatePolicy: DuplicatePolicy = .skip
+    ) async throws -> TranscribeOutput {
         try config.ensureDirectories()
         let lang = language ?? config.defaultLanguage
+
+        progress.step("Berechne Source-Hash …")
+        let hash = try AudioHasher.sha256(of: audioPath)
+
+        if duplicatePolicy == .skip, let existing = try store.recording(sourceHash: hash) {
+            progress.step("Bereits transkribiert (\(existing.id)) — überspringe. Erneut mit --force erzwingen.")
+            let segs = try store.segments(for: existing.id)
+            return TranscribeOutput(
+                recording: existing,
+                segments: segs,
+                markdownPath: URL(fileURLWithPath: existing.transcriptMd),
+                jsonPath: URL(fileURLWithPath: existing.transcriptJson),
+                newSpeakerIds: [],
+                matchedSpeakerIds: Array(Set(segs.compactMap { $0.speakerId })),
+                skipped: true
+            )
+        }
 
         progress.step("Lade Audio …")
         let audio = try AudioLoader.load(url: audioPath)
@@ -55,8 +83,6 @@ public final class TranscribePipeline {
         var pendingEmbeddingIds: [Int64] = []
         let recordingId = "rec_" + UUID().uuidString
 
-        // Embeddings get linked to the recording later (after the Recording row is inserted),
-        // to avoid a FK violation against the not-yet-existing recordings row.
         for (localId, centroid) in diarization.speakerCentroids {
             let result = try matcher.matchOrCreate(centroid: centroid, recordingId: nil, segmentRange: nil)
             localToGlobal[localId] = result.speakerId
@@ -69,13 +95,11 @@ public final class TranscribePipeline {
         }
 
         progress.step("Lade ASR-Modelle …")
-        let asr = TranscriptionPipeline()
+        let asr = TranscriptionPipeline(progress: progress)
         let modelVersion: AsrModelVersion = (lang == .en) ? .v2 : .v3
         try await asr.loadModels(version: modelVersion)
 
         progress.step("Transkribiere \(diarization.segments.count) Segmente …")
-        // v2 is English-only and doesn't accept the script-filter `language` hint;
-        // only pass it to the multilingual v3 model.
         let asrLang: Language? = (modelVersion == .v3) ? TranscriptionPipeline.language(for: lang) : nil
         let transcribed = try await asr.transcribe(
             diarized: diarization.segments,
@@ -100,9 +124,6 @@ public final class TranscribePipeline {
         let mdPath = config.transcriptsDir.appendingPathComponent("\(baseName).md")
         let jsonPath = config.transcriptsDir.appendingPathComponent("\(baseName).json")
 
-        let labels = try currentLabels()
-        let labelFn: (String) -> String = { id in labels[id] ?? "Unbekannt-\(String(id.suffix(6)))" }
-
         let recording = Recording(
             id: recordingId,
             title: title,
@@ -111,22 +132,12 @@ public final class TranscribePipeline {
             language: lang.rawValue,
             transcriptMd: mdPath.path,
             transcriptJson: jsonPath.path,
-            createdAt: createdAt
+            createdAt: createdAt,
+            sourceHash: hash
         )
 
         progress.step("Persistiere & rendere Transkripte …")
-        let md = MarkdownRenderer.render(
-            title: title,
-            date: createdAt,
-            durationSec: audio.durationSec,
-            language: lang.rawValue,
-            segments: segments,
-            speakerLabel: labelFn
-        )
-        try md.write(to: mdPath, atomically: true, encoding: .utf8)
-
-        let jsonData = try JSONRenderer.render(recording: recording, segments: segments, speakerLabel: labelFn)
-        try jsonData.write(to: jsonPath)
+        try writeTranscripts(recording: recording, segments: segments, durationSec: audio.durationSec, lang: lang.rawValue, title: title, mdPath: mdPath, jsonPath: jsonPath, createdAt: createdAt)
 
         try store.insertRecording(recording, segments: segments)
         try store.annotateEmbeddings(ids: pendingEmbeddingIds, recordingId: recordingId)
@@ -137,8 +148,78 @@ public final class TranscribePipeline {
             markdownPath: mdPath,
             jsonPath: jsonPath,
             newSpeakerIds: newIds,
-            matchedSpeakerIds: matchedIds
+            matchedSpeakerIds: matchedIds,
+            skipped: false
         )
+    }
+
+    /// Re-render Markdown + JSON for an existing recording using the current speaker labels.
+    /// No model invocation, no DB writes besides updating transcript paths if they changed.
+    public func rerender(recordingId: String) throws -> TranscribeOutput {
+        guard let recording = try store.recording(id: recordingId) else {
+            throw RerenderError.recordingNotFound(recordingId)
+        }
+        let segments = try store.segments(for: recordingId)
+
+        let mdPath = URL(fileURLWithPath: recording.transcriptMd)
+        let jsonPath = URL(fileURLWithPath: recording.transcriptJson)
+
+        try writeTranscripts(
+            recording: recording,
+            segments: segments,
+            durationSec: recording.durationSec,
+            lang: recording.language,
+            title: recording.title,
+            mdPath: mdPath,
+            jsonPath: jsonPath,
+            createdAt: recording.createdAt
+        )
+
+        return TranscribeOutput(
+            recording: recording,
+            segments: segments,
+            markdownPath: mdPath,
+            jsonPath: jsonPath,
+            newSpeakerIds: [],
+            matchedSpeakerIds: Array(Set(segments.compactMap { $0.speakerId })),
+            skipped: false
+        )
+    }
+
+    public enum RerenderError: Error, LocalizedError {
+        case recordingNotFound(String)
+        public var errorDescription: String? {
+            switch self {
+            case .recordingNotFound(let id): return "Aufnahme '\(id)' nicht gefunden."
+            }
+        }
+    }
+
+    private func writeTranscripts(
+        recording: Recording,
+        segments: [RecordingSegment],
+        durationSec: Double,
+        lang: String,
+        title: String?,
+        mdPath: URL,
+        jsonPath: URL,
+        createdAt: Date
+    ) throws {
+        let labels = try currentLabels()
+        let labelFn: (String) -> String = { id in labels[id] ?? "Unbekannt-\(String(id.suffix(6)))" }
+
+        let md = MarkdownRenderer.render(
+            title: title,
+            date: createdAt,
+            durationSec: durationSec,
+            language: lang,
+            segments: segments,
+            speakerLabel: labelFn
+        )
+        try md.write(to: mdPath, atomically: true, encoding: .utf8)
+
+        let jsonData = try JSONRenderer.render(recording: recording, segments: segments, speakerLabel: labelFn)
+        try jsonData.write(to: jsonPath)
     }
 
     private func currentLabels() throws -> [String: String] {

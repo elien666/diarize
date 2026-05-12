@@ -1,7 +1,7 @@
 import Foundation
 import GRDB
 
-public final class SpeakerStore {
+public final class SpeakerStore: @unchecked Sendable {
     public let dbQueue: DatabaseQueue
 
     public init(path: URL) throws {
@@ -139,5 +139,29 @@ public final class SpeakerStore {
 
     public func recording(id: String) throws -> Recording? {
         try dbQueue.read { db in try Recording.fetchOne(db, key: id) }
+    }
+
+    public func recording(sourceHash: String) throws -> Recording? {
+        try dbQueue.read { db in
+            try Recording.filter(Column("sourceHash") == sourceHash).fetchOne(db)
+        }
+    }
+
+    public func segments(for recordingId: String) throws -> [RecordingSegment] {
+        try dbQueue.read { db in
+            try RecordingSegment
+                .filter(Column("recordingId") == recordingId)
+                .order(Column("startSec").asc)
+                .fetchAll(db)
+        }
+    }
+
+    public func updateRecordingTranscriptPaths(id: String, mdPath: String, jsonPath: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE recordings SET transcriptMd = ?, transcriptJson = ? WHERE id = ?",
+                arguments: [mdPath, jsonPath, id]
+            )
+        }
     }
 }

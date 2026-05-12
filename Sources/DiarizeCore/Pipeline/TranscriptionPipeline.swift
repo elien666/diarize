@@ -12,9 +12,11 @@ public struct TranscribedSegment: Sendable {
 public final class TranscriptionPipeline {
     private let manager: AsrManager
     private var loaded: Bool = false
+    private weak var progress: ProgressReporter?
 
-    public init(config: ASRConfig = .default) {
+    public init(config: ASRConfig = .default, progress: ProgressReporter? = nil) {
         self.manager = AsrManager(config: config)
+        self.progress = progress
     }
 
     public func loadModels(version: AsrModelVersion = .v3) async throws {
@@ -34,8 +36,13 @@ public final class TranscriptionPipeline {
     ) async throws -> [TranscribedSegment] {
         var out: [TranscribedSegment] = []
         out.reserveCapacity(diarized.count)
+        let total = diarized.count
 
-        for seg in diarized {
+        // Throttled progress: report every N segments or every 2 seconds, whichever comes first.
+        var lastReported = Date(timeIntervalSince1970: 0)
+        let reportEvery = max(1, total / 50)
+
+        for (idx, seg) in diarized.enumerated() {
             let startIdx = max(0, Int(seg.startSec * Double(sampleRate)))
             let endIdx = min(samples.count, Int(seg.endSec * Double(sampleRate)))
             guard endIdx > startIdx else { continue }
@@ -56,6 +63,16 @@ public final class TranscriptionPipeline {
                 text: trimmed,
                 confidence: Double(result.confidence)
             ))
+
+            let now = Date()
+            let shouldReport = (idx + 1) == total
+                || (idx + 1) % reportEvery == 0
+                || now.timeIntervalSince(lastReported) >= 2.0
+            if shouldReport {
+                let pct = Int((Double(idx + 1) / Double(total)) * 100)
+                progress?.step("Transkribiere [\(idx + 1)/\(total)] \(pct)%")
+                lastReported = now
+            }
         }
 
         return out

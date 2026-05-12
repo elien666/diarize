@@ -8,6 +8,8 @@ struct DiarizeCommand: AsyncParsableCommand {
         version: "0.1.0",
         subcommands: [
             TranscribeCommand.self,
+            RecordCommand.self,
+            SearchCommand.self,
             SpeakersCommand.self,
             ArchiveCommand.self,
             ConfigCommand.self,

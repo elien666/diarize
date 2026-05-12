@@ -72,10 +72,11 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
     public var transcriptMd: String
     public var transcriptJson: String
     public var createdAt: Date
+    public var sourceHash: String?
 
     public static let databaseTableName = "recordings"
 
-    public init(id: String = "rec_" + UUID().uuidString, title: String?, sourcePath: String, durationSec: Double, language: String, transcriptMd: String, transcriptJson: String, createdAt: Date = Date()) {
+    public init(id: String = "rec_" + UUID().uuidString, title: String?, sourcePath: String, durationSec: Double, language: String, transcriptMd: String, transcriptJson: String, createdAt: Date = Date(), sourceHash: String? = nil) {
         self.id = id
         self.title = title
         self.sourcePath = sourcePath
@@ -84,6 +85,7 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
         self.transcriptMd = transcriptMd
         self.transcriptJson = transcriptJson
         self.createdAt = createdAt
+        self.sourceHash = sourceHash
     }
 }
 
