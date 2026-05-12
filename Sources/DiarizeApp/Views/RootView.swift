@@ -28,12 +28,16 @@ struct RootView: View {
                 .disabled(library.importInProgress)
             }
             ToolbarItem(placement: .status) {
-                if library.importInProgress {
-                    ProgressView().controlSize(.small)
+                HStack(spacing: 6) {
+                    if library.importInProgress {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(library.statusMessage.isEmpty ? " " : library.statusMessage)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .frame(minWidth: 200, alignment: .leading)
                 }
-                Text(library.statusMessage)
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
             }
         }
         .onChange(of: searchQuery) { _, new in

@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import ScreenCaptureKit
 
@@ -198,12 +198,15 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outCapacity) else { return [] }
 
         var error: NSError?
-        var fed = false
+        // AVAudioConverter pulls input via this callback synchronously, but Swift 6
+        // types it as @Sendable. Wrap mutable state in a class so the closure only
+        // captures a reference.
+        let state = ConvertCallbackState(buffer: buffer)
         conv.convert(to: out, error: &error) { _, status in
-            if fed { status.pointee = .noDataNow; return nil }
-            fed = true
+            if state.fed { status.pointee = .noDataNow; return nil }
+            state.fed = true
             status.pointee = .haveData
-            return buffer
+            return state.buffer
         }
         if error != nil { return [] }
 
@@ -211,6 +214,12 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         let count = Int(out.frameLength)
         return Array(UnsafeBufferPointer(start: channels[0], count: count))
     }
+}
+
+private final class ConvertCallbackState: @unchecked Sendable {
+    let buffer: AVAudioPCMBuffer
+    var fed: Bool = false
+    init(buffer: AVAudioPCMBuffer) { self.buffer = buffer }
 }
 
 @available(macOS 13, *)
