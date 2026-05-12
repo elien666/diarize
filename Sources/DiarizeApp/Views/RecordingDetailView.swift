@@ -19,8 +19,25 @@ struct RecordingDetailView: View {
             Divider()
             transcript
         }
-        .onAppear { reload() }
-        .onChange(of: recording.id) { _, _ in reload() }
+        .onAppear {
+            reload()
+            consumePendingJump()
+        }
+        .onChange(of: recording.id) { _, _ in
+            reload()
+            consumePendingJump()
+        }
+        .onChange(of: library.pendingJumpSec) { _, _ in consumePendingJump() }
+    }
+
+    private func consumePendingJump() {
+        guard let target = library.pendingJumpSec else { return }
+        loadAudioIfNeeded()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            player.seek(to: target)
+            player.play()
+            library.pendingJumpSec = nil
+        }
     }
 
     private var header: some View {

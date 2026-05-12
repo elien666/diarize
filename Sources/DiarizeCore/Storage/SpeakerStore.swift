@@ -118,6 +118,40 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    public struct RecordingAppearance: Sendable {
+        public let recording: Recording
+        public let segmentCount: Int
+        public let speechTime: Double
+        public let firstAppearance: Double
+    }
+
+    /// Returns the recordings that contain this speaker, with per-recording stats.
+    /// Sorted by recording date (newest first).
+    public func recordings(for speakerId: String) throws -> [RecordingAppearance] {
+        try dbQueue.read { db in
+            let sql = """
+                SELECT r.*, COUNT(rs.id) AS segCount,
+                       COALESCE(SUM(rs.endSec - rs.startSec), 0.0) AS speechTime,
+                       COALESCE(MIN(rs.startSec), 0.0) AS firstAppearance
+                FROM recordings r
+                JOIN recording_segments rs ON rs.recordingId = r.id
+                WHERE rs.speakerId = ?
+                GROUP BY r.id
+                ORDER BY r.createdAt DESC
+            """
+            let rows = try Row.fetchAll(db, sql: sql, arguments: [speakerId])
+            return try rows.map { row in
+                let recording = try Recording(row: row)
+                return RecordingAppearance(
+                    recording: recording,
+                    segmentCount: row["segCount"] ?? 0,
+                    speechTime: row["speechTime"] ?? 0,
+                    firstAppearance: row["firstAppearance"] ?? 0
+                )
+            }
+        }
+    }
+
     // MARK: - Recordings & Segments
 
     public func insertRecording(_ recording: Recording, segments: [RecordingSegment]) throws {

@@ -55,6 +55,20 @@ final class LibraryViewModel: ObservableObject {
         (try? store.segments(for: recordingId)) ?? []
     }
 
+    func recordings(for speakerId: String) -> [SpeakerStore.RecordingAppearance] {
+        (try? store.recordings(for: speakerId)) ?? []
+    }
+
+    func openRecording(_ recordingId: String, jumpToSec: Double? = nil) {
+        sidebarSection = .recordings
+        selectedRecordingId = recordingId
+        if let jumpToSec {
+            pendingJumpSec = jumpToSec
+        }
+    }
+
+    @Published var pendingJumpSec: Double?
+
     func updateLabel(speakerId: String, name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         try? store.updateLabel(id: speakerId, label: trimmed.isEmpty ? nil : trimmed)

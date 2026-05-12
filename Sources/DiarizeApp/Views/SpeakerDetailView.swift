@@ -13,7 +13,13 @@ struct SpeakerDetailView: View {
             Divider()
             actionsBar
             Divider()
-            metadataList
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    metadataList
+                    appearancesList
+                }
+                .padding(.top, 8)
+            }
         }
         .padding()
         .onAppear { newLabel = speaker.label ?? "" }
@@ -66,6 +72,69 @@ struct SpeakerDetailView: View {
             LabeledContent("Erstellt") { Text(speaker.createdAt, format: .dateTime) }
         }
         .formStyle(.grouped)
+    }
+
+    private var appearancesList: some View {
+        let appearances = library.recordings(for: speaker.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Aufnahmen")
+                    .font(.headline)
+                Text("(\(appearances.count))")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+
+            if appearances.isEmpty {
+                Text("Dieser Sprecher hat noch keine Segmente.")
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(appearances.enumerated()), id: \.element.recording.id) { idx, item in
+                        Button {
+                            library.openRecording(item.recording.id, jumpToSec: item.firstAppearance)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.recording.title ?? "Aufnahme")
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                    HStack(spacing: 8) {
+                                        Text(item.recording.createdAt, style: .date)
+                                        Text("·")
+                                        Text(item.recording.language.uppercased())
+                                        Text("·")
+                                        Text("ab \(formatDuration(item.firstAppearance))")
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("\(item.segmentCount) Segmente")
+                                        .font(.caption.monospacedDigit())
+                                    Text(formatDuration(item.speechTime))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Image(systemName: "chevron.right")
+                                    .foregroundStyle(.tertiary)
+                                    .font(.caption)
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .background(idx.isMultiple(of: 2) ? Color.clear : Color.secondary.opacity(0.05))
+                    }
+                }
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(6)
+                .padding(.horizontal)
+            }
+        }
     }
 
     private func formatDuration(_ seconds: Double) -> String {
