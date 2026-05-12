@@ -353,6 +353,39 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
+    /// Reassign a segment to a different (or new) speaker. When `speakerId` is nil,
+    /// a brand new speaker is created.
+    func setSegmentSpeaker(segmentId: Int64, to speakerId: String?) {
+        let targetId: String
+        if let id = speakerId {
+            targetId = id
+        } else {
+            let newSpeaker = Speaker()
+            try? store.insertSpeaker(newSpeaker)
+            targetId = newSpeaker.id
+        }
+        try? store.updateSegmentSpeaker(segmentId: segmentId, speakerId: targetId)
+        reload()
+        rerenderRecording(containingSegmentId: segmentId)
+    }
+
+    /// Split a segment at the given absolute time.
+    func splitSegment(segmentId: Int64, atSec: Double) {
+        do {
+            _ = try store.splitSegment(segmentId: segmentId, at: atSec)
+            reload()
+            rerenderRecording(containingSegmentId: segmentId)
+        } catch {
+            presentError(title: "Segment kann nicht geteilt werden", message: error.localizedDescription)
+        }
+    }
+
+    private func rerenderRecording(containingSegmentId segmentId: Int64) {
+        guard let seg = try? store.segment(id: segmentId) else { return }
+        let pipeline = TranscribePipeline(config: config, store: store, progress: SilentProgress())
+        _ = try? pipeline.rerender(recordingId: seg.recordingId)
+    }
+
     @discardableResult
     func deleteSpeakerIfEmpty(_ speakerId: String) -> Bool {
         let count = segmentCount(speakerId: speakerId)

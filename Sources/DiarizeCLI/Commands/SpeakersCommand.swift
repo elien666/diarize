@@ -6,7 +6,7 @@ struct SpeakersCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "speakers",
         abstract: "Verwaltet die Sprecher-Bibliothek.",
-        subcommands: [List.self, Label.self, Show.self, Merge.self, Delete.self, Recalibrate.self]
+        subcommands: [List.self, Label.self, Show.self, Merge.self, Delete.self, Recalibrate.self, Diagnose.self]
     )
 
     struct List: ParsableCommand {
@@ -138,6 +138,49 @@ struct SpeakersCommand: AsyncParsableCommand {
             guard try store.speaker(id: speakerId) != nil else { throw ValidationError("Sprecher '\(speakerId)' nicht gefunden.") }
             try store.deleteSpeaker(id: speakerId)
             print("✓ \(speakerId) gelöscht.")
+        }
+    }
+
+    struct Diagnose: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "diagnose",
+            abstract: "Zeigt Embedding-Ähnlichkeiten zu allen anderen Sprechern (Hilfe bei Merge-Entscheidungen)."
+        )
+        @Argument(help: "Speaker-ID oder Label-Substring.") var speakerRef: String
+
+        func run() throws {
+            let config = AppConfigLoader.load()
+            try config.ensureDirectories()
+            let store = try SpeakerStore(path: config.databasePath)
+            let speakers = try store.allSpeakers()
+            guard let target = speakers.first(where: { $0.id == speakerRef })
+                ?? speakers.first(where: { ($0.label ?? "").localizedCaseInsensitiveContains(speakerRef) }) else {
+                throw ValidationError("Sprecher '\(speakerRef)' nicht gefunden.")
+            }
+            let targetEmbeddings = try store.embeddings(for: target.id).map { $0.asFloats }
+            guard let targetCentroid = MathUtil.mean(of: targetEmbeddings) else {
+                print("Kein Embedding vorhanden.")
+                return
+            }
+            print("Ziel: \(target.label ?? target.id)  (\(targetEmbeddings.count) Embeddings)")
+            print("Aktueller Threshold: \(config.similarityThreshold)")
+            print("")
+            print("Ähnlichkeit zu anderen Sprechern (Centroid-Cosine):")
+            print(String(format: "%-44s  %-20s  %s", "ID", "Label", "Sim"))
+            var rows: [(String, String, Float)] = []
+            for s in speakers where s.id != target.id {
+                let embs = try store.embeddings(for: s.id).map { $0.asFloats }
+                guard let c = MathUtil.mean(of: embs) else { continue }
+                let sim = MathUtil.cosineSimilarity(targetCentroid, c)
+                rows.append((s.id, s.label ?? "—", sim))
+            }
+            for (id, label, sim) in rows.sorted(by: { $0.2 > $1.2 }) {
+                let marker = sim >= config.similarityThreshold ? "  ← match" : ""
+                print(String(format: "%-44s  %-20s  %.3f%@", id, label, sim, marker))
+            }
+            print("")
+            print("Tipp: zwei Sprecher die dieselbe Person sind sollten ≥ \(config.similarityThreshold) erreichen.")
+            print("       'diarize speakers merge <quelle> <ziel>' führt sie zusammen.")
         }
     }
 }

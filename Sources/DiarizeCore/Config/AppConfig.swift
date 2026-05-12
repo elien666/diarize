@@ -12,7 +12,7 @@ public struct AppConfig: Sendable {
     }
 
     public static let defaultArchiveSubpath = "Library/Application Support/diarize/archive"
-    public static let defaultSimilarityThreshold: Float = 0.75
+    public static let defaultSimilarityThreshold: Float = 0.6
 
     public init(
         archivePath: URL,

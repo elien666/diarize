@@ -273,6 +273,7 @@ struct RecordingDetailView: View {
                             isCurrent: isCurrent(seg),
                             isRenaming: renamingSpeakerId == seg.speakerId,
                             renameDraft: $renameDraft,
+                            allSpeakers: library.speakers,
                             onTapTimestamp: { player.seek(to: seg.startSec); player.play() },
                             onStartRename: {
                                 guard let sid = seg.speakerId else { return }
@@ -286,7 +287,22 @@ struct RecordingDetailView: View {
                                 renamingSpeakerId = nil
                                 reload()
                             },
-                            onCancelRename: { renamingSpeakerId = nil }
+                            onCancelRename: { renamingSpeakerId = nil },
+                            onAssignSpeaker: { newSpeakerId in
+                                if let segId = seg.id {
+                                    library.setSegmentSpeaker(segmentId: segId, to: newSpeakerId)
+                                    reload()
+                                }
+                            },
+                            onSplitHere: {
+                                if let segId = seg.id {
+                                    let t = player.currentTime > seg.startSec && player.currentTime < seg.endSec
+                                        ? player.currentTime
+                                        : (seg.startSec + seg.endSec) / 2
+                                    library.splitSegment(segmentId: segId, atSec: t)
+                                    reload()
+                                }
+                            }
                         )
                         .id(seg.id ?? 0)
                     }
@@ -392,10 +408,15 @@ struct SegmentRow: View {
     let isCurrent: Bool
     let isRenaming: Bool
     @Binding var renameDraft: String
+    let allSpeakers: [Speaker]
     let onTapTimestamp: () -> Void
     let onStartRename: () -> Void
     let onSubmitRename: () -> Void
     let onCancelRename: () -> Void
+    let onAssignSpeaker: (String?) -> Void   // nil = create new speaker
+    let onSplitHere: () -> Void
+
+    @State private var hovering = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -419,16 +440,18 @@ struct SegmentRow: View {
                         Button("Abbrechen", action: onCancelRename).controlSize(.small)
                     }
                 } else {
-                    Button(action: onStartRename) {
-                        HStack(spacing: 4) {
-                            Circle().fill(color).frame(width: 8, height: 8)
-                            Text(speakerLabel)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(color)
+                    HStack(spacing: 6) {
+                        speakerMenu
+                        if hovering {
+                            Button(action: onSplitHere) {
+                                Image(systemName: "scissors")
+                                    .font(.caption2)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Segment hier teilen (an Player-Position)")
                         }
                     }
-                    .buttonStyle(.plain)
-                    .help("Klicken zum Umbenennen")
                 }
                 Text(segment.text)
                     .font(.body)
@@ -439,6 +462,46 @@ struct SegmentRow: View {
             }
             Spacer()
         }
+        .onHover { hovering = $0 }
+    }
+
+    private var speakerMenu: some View {
+        Menu {
+            Section("Anderem Sprecher zuordnen") {
+                ForEach(allSpeakers, id: \.id) { sp in
+                    Button {
+                        onAssignSpeaker(sp.id)
+                    } label: {
+                        Label(sp.label ?? "Unbekannt-\(String(sp.id.suffix(6)))",
+                              systemImage: sp.id == segment.speakerId ? "checkmark" : "circle.fill")
+                    }
+                }
+                Button {
+                    onAssignSpeaker(nil)
+                } label: {
+                    Label("Neuer Sprecher …", systemImage: "person.badge.plus")
+                }
+            }
+            Divider()
+            Button {
+                onStartRename()
+            } label: {
+                Label("Aktuellen Sprecher umbenennen …", systemImage: "pencil")
+            }
+            .disabled(segment.speakerId == nil)
+        } label: {
+            HStack(spacing: 4) {
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text(speakerLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(color)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private func formatTimestamp(_ seconds: Double) -> String {

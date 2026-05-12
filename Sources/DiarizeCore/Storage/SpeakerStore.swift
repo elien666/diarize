@@ -198,6 +198,78 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    public func segment(id: Int64) throws -> RecordingSegment? {
+        try dbQueue.read { db in try RecordingSegment.fetchOne(db, key: id) }
+    }
+
+    public func updateSegmentSpeaker(segmentId: Int64, speakerId: String?) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE recording_segments SET speakerId = ? WHERE id = ?",
+                arguments: [speakerId, segmentId]
+            )
+        }
+    }
+
+    /// Split a segment at `splitTimeSec` (absolute, in the original audio timeline).
+    /// First half keeps the original id and ends at splitTimeSec; second half is a new
+    /// segment with the same speaker (caller may reassign afterwards).
+    /// Returns the new segment's id.
+    @discardableResult
+    public func splitSegment(segmentId: Int64, at splitTimeSec: Double) throws -> Int64 {
+        try dbQueue.write { db in
+            guard let original = try RecordingSegment.fetchOne(db, key: segmentId) else {
+                throw SpeakerStoreError.segmentNotFound(segmentId)
+            }
+            guard splitTimeSec > original.startSec + 0.05 && splitTimeSec < original.endSec - 0.05 else {
+                throw SpeakerStoreError.invalidSplitTime
+            }
+
+            // Split text proportionally so both halves get something readable.
+            let totalDur = original.endSec - original.startSec
+            let firstFrac = (splitTimeSec - original.startSec) / totalDur
+            let (firstText, secondText) = Self.splitText(original.text, fraction: firstFrac)
+
+            try db.execute(
+                sql: "UPDATE recording_segments SET endSec = ?, text = ? WHERE id = ?",
+                arguments: [splitTimeSec, firstText, segmentId]
+            )
+
+            var newSegment = RecordingSegment(
+                recordingId: original.recordingId,
+                speakerId: original.speakerId,
+                startSec: splitTimeSec,
+                endSec: original.endSec,
+                text: secondText,
+                confidence: original.confidence
+            )
+            try newSegment.insert(db)
+            return newSegment.id ?? 0
+        }
+    }
+
+    private static func splitText(_ text: String, fraction: Double) -> (String, String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return ("", "") }
+        let words = trimmed.split(whereSeparator: { $0.isWhitespace })
+        guard words.count >= 2 else { return (trimmed, "") }
+        let cut = max(1, min(words.count - 1, Int((Double(words.count) * fraction).rounded())))
+        let first = words.prefix(cut).joined(separator: " ")
+        let second = words.dropFirst(cut).joined(separator: " ")
+        return (first, second)
+    }
+
+    public enum SpeakerStoreError: Error, LocalizedError {
+        case segmentNotFound(Int64)
+        case invalidSplitTime
+        public var errorDescription: String? {
+            switch self {
+            case .segmentNotFound(let id): return "Segment \(id) nicht gefunden."
+            case .invalidSplitTime: return "Split-Zeit liegt zu nah an den Segmentgrenzen."
+            }
+        }
+    }
+
     public func replaceSegments(recordingId: String, with segments: [RecordingSegment]) throws {
         try dbQueue.write { db in
             try db.execute(sql: "DELETE FROM recording_segments WHERE recordingId = ?", arguments: [recordingId])

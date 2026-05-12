@@ -15,7 +15,7 @@ public final class SpeakerMatcher {
         public let threshold: Float
         public let k: Int                  // number of nearest neighbors to consider
         public let minVotesRatio: Float    // fraction of K that must agree for a match
-        public init(threshold: Float, k: Int = 5, minVotesRatio: Float = 0.6) {
+        public init(threshold: Float, k: Int = 5, minVotesRatio: Float = 0.4) {
             self.threshold = threshold
             self.k = k
             self.minVotesRatio = minVotesRatio

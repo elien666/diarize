@@ -27,6 +27,40 @@ import Foundation
         #expect(back?.sourceHash == "deadbeef")
     }
 
+    @Test func updateSegmentSpeakerWorks() throws {
+        let store = try makeStore()
+        let bjorn = Speaker(label: "Björn"); try store.insertSpeaker(bjorn)
+        let bauer = Speaker(label: "Bauer"); try store.insertSpeaker(bauer)
+        let r = Recording(id: "rec_seg", title: nil, sourcePath: "/dev/null", durationSec: 10,
+                          language: "de", transcriptMd: "/tmp/m.md", transcriptJson: "/tmp/j.json")
+        let seg = RecordingSegment(recordingId: r.id, speakerId: bjorn.id, startSec: 0, endSec: 5,
+                                   text: "Hi", confidence: 0.9)
+        try store.insertRecording(r, segments: [seg])
+        let segId = try store.segments(for: r.id).first!.id!
+        try store.updateSegmentSpeaker(segmentId: segId, speakerId: bauer.id)
+        #expect(try store.segment(id: segId)?.speakerId == bauer.id)
+    }
+
+    @Test func splitSegmentInsertsHalves() throws {
+        let store = try makeStore()
+        let s = Speaker(label: "S"); try store.insertSpeaker(s)
+        let r = Recording(id: "rec_split", title: nil, sourcePath: "/dev/null", durationSec: 10,
+                          language: "de", transcriptMd: "/tmp/m.md", transcriptJson: "/tmp/j.json")
+        let seg = RecordingSegment(recordingId: r.id, speakerId: s.id, startSec: 0, endSec: 10,
+                                   text: "eins zwei drei vier fünf sechs", confidence: 0.9)
+        try store.insertRecording(r, segments: [seg])
+        let segId = try store.segments(for: r.id).first!.id!
+        let newId = try store.splitSegment(segmentId: segId, at: 5.0)
+        let segs = try store.segments(for: r.id)
+        #expect(segs.count == 2)
+        #expect(segs.first!.endSec == 5.0)
+        #expect(segs.last!.id == newId)
+        #expect(segs.last!.startSec == 5.0)
+        #expect(segs.last!.endSec == 10.0)
+        #expect(!segs.first!.text.isEmpty)
+        #expect(!segs.last!.text.isEmpty)
+    }
+
     @Test func lookupByHashFindsRecording() throws {
         let store = try makeStore()
         let r = Recording(
