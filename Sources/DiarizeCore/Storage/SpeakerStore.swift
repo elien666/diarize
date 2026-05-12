@@ -190,6 +190,12 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    public func deleteRecording(id: String) throws {
+        try dbQueue.write { db in
+            _ = try Recording.deleteOne(db, key: id)
+        }
+    }
+
     public func updateRecordingTranscriptPaths(id: String, mdPath: String, jsonPath: String) throws {
         try dbQueue.write { db in
             try db.execute(

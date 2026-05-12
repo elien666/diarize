@@ -8,11 +8,15 @@ final class AudioPlayer: ObservableObject {
     @Published var duration: Double = 0
     @Published var isPlaying: Bool = false
 
+    private(set) var loadedURL: URL?
     private var player: AVPlayer?
     private var timeObserver: Any?
 
     func load(url: URL) {
+        // Avoid reloading the same file (would interrupt playback / reset position).
+        if loadedURL == url, player != nil { return }
         cleanup()
+        loadedURL = url
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         self.player = p
@@ -64,6 +68,7 @@ final class AudioPlayer: ObservableObject {
         player?.pause()
         player = nil
         timeObserver = nil
+        loadedURL = nil
         currentTime = 0
         duration = 0
         isPlaying = false

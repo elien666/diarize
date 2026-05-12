@@ -196,6 +196,12 @@ final class LibraryViewModel: ObservableObject {
     // MARK: - Speaker delete (only if no segments)
 
     /// Returns true if the speaker has no segments referencing them and was deleted.
+    func deleteRecording(_ recordingId: String) {
+        try? store.deleteRecording(id: recordingId)
+        if selectedRecordingId == recordingId { selectedRecordingId = nil }
+        reload()
+    }
+
     @discardableResult
     func deleteSpeakerIfEmpty(_ speakerId: String) -> Bool {
         let count = segmentCount(speakerId: speakerId)

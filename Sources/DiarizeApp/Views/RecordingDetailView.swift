@@ -17,17 +17,52 @@ struct RecordingDetailView: View {
             Divider()
             playerBar
             Divider()
-            transcript
+            if segments.isEmpty {
+                emptyTranscriptState
+            } else {
+                transcript
+            }
         }
         .onAppear {
             reload()
+            loadAudioIfNeeded()
             consumePendingJump()
         }
         .onChange(of: recording.id) { _, _ in
             reload()
+            loadAudioIfNeeded()
             consumePendingJump()
         }
         .onChange(of: library.pendingJumpSec) { _, _ in consumePendingJump() }
+    }
+
+    private var emptyTranscriptState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "text.bubble")
+                .font(.system(size: 48))
+                .foregroundStyle(.tertiary)
+            Text("Kein Transkript")
+                .font(.headline)
+            Text("Bei dieser Aufnahme wurde keine Sprache erkannt.\nDu kannst sie unten trotzdem abspielen.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button {
+                    let url = URL(fileURLWithPath: recording.sourcePath)
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } label: {
+                    Label("Im Finder zeigen", systemImage: "folder")
+                }
+                Button(role: .destructive) {
+                    library.deleteRecording(recording.id)
+                } label: {
+                    Label("Aufnahme löschen", systemImage: "trash")
+                }
+            }
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     private func consumePendingJump() {
