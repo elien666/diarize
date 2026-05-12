@@ -15,6 +15,16 @@ final class AudioPlayer: ObservableObject {
     func load(url: URL) {
         // Avoid reloading the same file (would interrupt playback / reset position).
         if loadedURL == url, player != nil { return }
+        loadFresh(url: url)
+    }
+
+    /// Force a reload even if URL matches (e.g. after a recording finished and the file
+    /// changed under us — the previous AVPlayerItem may have cached duration=0).
+    func forceReload(url: URL) {
+        loadFresh(url: url)
+    }
+
+    private func loadFresh(url: URL) {
         cleanup()
         loadedURL = url
         let item = AVPlayerItem(url: url)

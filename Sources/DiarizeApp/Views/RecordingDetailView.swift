@@ -34,7 +34,14 @@ struct RecordingDetailView: View {
             loadAudioIfNeeded()
             consumePendingJump()
         }
-        .onChange(of: recording.processingState) { _, _ in reload() }
+        .onChange(of: recording.processingState) { _, newState in
+            reload()
+            // After analysis, the WAV is finalized (header + data flushed). Force a reload
+            // even if URL is unchanged — the duration was 0 while still recording.
+            if newState == .done || newState == .empty || newState == .failed {
+                player.forceReload(url: URL(fileURLWithPath: recording.sourcePath))
+            }
+        }
         .onChange(of: library.pendingJumpSec) { _, _ in consumePendingJump() }
     }
 

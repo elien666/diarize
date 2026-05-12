@@ -219,6 +219,10 @@ final class LibraryViewModel: ObservableObject {
         }
         guard let recorder = activeRecorder, let recordingId = activeRecordingId else { return }
         statusMessage = "Stoppe Aufnahme …"
+        // Flip the row to analyzing right away so the controls disappear immediately,
+        // before the async stop/analysis chain finishes.
+        try? store.setProcessingState(recordingId: recordingId, state: .analyzing)
+        reload()
         Task {
             try? await recorder.stop()
             let received = recorder.samplesReceived
