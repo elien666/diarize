@@ -39,7 +39,32 @@ final class LibraryViewModel: ObservableObject {
         try? config.ensureDirectories()
         self.store = (try? SpeakerStore(path: config.databasePath)) ?? Self.fallbackStore()
         self.searchService = SearchService(store: store)
+        recoverOrphanedRecordings()
         reload()
+    }
+
+    /// On launch, recover recordings stuck in `recording`/`analyzing` state from a previous
+    /// session (app crashed or got force-quit by macOS during a permission prompt).
+    /// Strategy: tiny WAVs (< 8 KB, just header) → delete. Anything bigger → mark as failed
+    /// so the user can either retry analysis or play it back.
+    private func recoverOrphanedRecordings() {
+        guard let recs = try? store.allRecordings() else { return }
+        for r in recs where r.processingState == .recording || r.processingState == .analyzing {
+            let url = URL(fileURLWithPath: r.sourcePath)
+            let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let size = (attrs?[.size] as? Int) ?? 0
+            if size < 8_192 {
+                // Empty / header-only WAV — drop the row and the file.
+                try? store.deleteRecording(id: r.id)
+                try? FileManager.default.removeItem(at: url)
+            } else {
+                try? store.setProcessingState(
+                    recordingId: r.id,
+                    state: .failed,
+                    errorMessage: "Aufnahme wurde durch App-Neustart unterbrochen. Du kannst sie abspielen oder die Analyse erneut versuchen."
+                )
+            }
+        }
     }
 
     private static func fallbackStore() -> SpeakerStore {
@@ -182,6 +207,16 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func stopRecordingAndTranscribe() {
+        // Orphaned-recording recovery: detail view may show stop buttons for a recording
+        // whose recorder is gone (app restart). In that case just try analysis on the file.
+        if activeRecorder == nil, let id = selectedRecordingId,
+           let r = try? store.recording(id: id),
+           r.processingState == .recording {
+            try? store.setProcessingState(recordingId: id, state: .analyzing)
+            reload()
+            analyzeRecording(recordingId: id)
+            return
+        }
         guard let recorder = activeRecorder, let recordingId = activeRecordingId else { return }
         statusMessage = "Stoppe Aufnahme …"
         Task {
@@ -206,6 +241,16 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func cancelRecording() {
+        // Orphaned recording: no active recorder but DB row says we're recording.
+        if activeRecorder == nil, let id = selectedRecordingId,
+           let r = try? store.recording(id: id),
+           r.processingState == .recording {
+            try? store.deleteRecording(id: id)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: r.sourcePath))
+            if selectedRecordingId == id { selectedRecordingId = nil }
+            reload()
+            return
+        }
         guard let recorder = activeRecorder, let url = recordingOutputURL, let recordingId = activeRecordingId else { return }
         statusMessage = "Aufnahme verworfen."
         Task {
