@@ -186,9 +186,20 @@ final class LibraryViewModel: ObservableObject {
         statusMessage = "Stoppe Aufnahme …"
         Task {
             try? await recorder.stop()
+            let received = recorder.samplesReceived
             await MainActor.run {
                 self.cleanupRecorder()
                 self.reload()
+                let totalSamples = (received[.mic] ?? 0) + (received[.system] ?? 0)
+                if totalSamples == 0 {
+                    try? self.store.setProcessingState(
+                        recordingId: recordingId,
+                        state: .failed,
+                        errorMessage: "Während der Aufnahme wurden keine Audio-Samples empfangen.\n\nMögliche Ursachen:\n• Mikrofon-Berechtigung wurde verweigert (Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon)\n• Bildschirm- & Systemaudio-Berechtigung verweigert (für System-Audio)\n• Falsches Eingabegerät\n\nDie WAV ist leer — du kannst die Aufnahme löschen und neu starten."
+                    )
+                    self.reload()
+                    return
+                }
                 self.analyzeRecording(recordingId: recordingId)
             }
         }

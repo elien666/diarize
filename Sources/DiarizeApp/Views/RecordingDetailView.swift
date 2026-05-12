@@ -77,6 +77,9 @@ struct RecordingDetailView: View {
     private var controlBar: some View {
         if isLiveRecording {
             liveRecordingBar
+        } else if recording.processingState == .analyzing {
+            // While analyzing, file isn't seekable yet; hide player to avoid empty controls.
+            EmptyView()
         } else {
             playerBar
         }

@@ -67,12 +67,26 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         super.init()
     }
 
+    /// Total samples written to the mixer per channel since start. Useful for diagnosis.
+    public private(set) var samplesReceived: [AudioMixer.Channel: Int] = [.mic: 0, .system: 0]
+
     public func start() async throws {
         if config.sources.contains(.mic) {
             try startMic()
         }
         if config.sources.contains(.system) {
-            try await startSystem()
+            do {
+                try await startSystem()
+            } catch {
+                // Don't kill the whole recording if only system audio fails — usually a
+                // permission issue. Mic capture (if requested) keeps running.
+                if config.sources.contains(.mic) {
+                    NSLog("[diarize] System audio failed — continuing with mic only: \(error.localizedDescription)")
+                    mixer.disableChannel(.system)
+                } else {
+                    throw error
+                }
+            }
         }
     }
 
@@ -101,6 +115,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             guard let self else { return }
             let samples = self.resample(buffer: buffer, inputFormat: inputFormat, converter: &self.micConverter)
+            self.samplesReceived[.mic, default: 0] += samples.count
             self.mixer.append(samples, channel: .mic)
         }
 
@@ -133,6 +148,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             let output = SystemAudioOutput { [weak self] sampleBuffer in
                 guard let self, let pcm = self.pcmBuffer(from: sampleBuffer) else { return }
                 let samples = self.resample(buffer: pcm, inputFormat: pcm.format, converter: &self.systemConverter)
+                self.samplesReceived[.system, default: 0] += samples.count
                 self.mixer.append(samples, channel: .system)
             }
             try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: DispatchQueue(label: "diarize.recorder.system"))

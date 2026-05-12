@@ -27,9 +27,25 @@ public final class AudioMixer: @unchecked Sendable {
     private var lastActivity: [Date] = [Date.distantPast, Date.distantPast]
     private let silenceTimeoutSeconds: Double = 0.25
 
+    private var tickTimer: DispatchSourceTimer?
+
     public init(writer: WAVWriter, enabled: Set<Channel>) {
         self.writer = writer
         self.enabledChannels = enabled
+        // Periodic tick so we still flush even when one source is silent for long stretches.
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        timer.setEventHandler { [weak self] in self?.flushIfPossible() }
+        timer.resume()
+        self.tickTimer = timer
+    }
+
+    public func disableChannel(_ channel: Channel) {
+        queue.async {
+            self.enabledChannels.remove(channel)
+            self.buffers[channel.rawValue].removeAll()
+            self.flushIfPossible()
+        }
     }
 
     public func append(_ samples: [Float], channel: Channel) {
@@ -42,6 +58,8 @@ public final class AudioMixer: @unchecked Sendable {
     }
 
     public func flushAndClose() throws {
+        tickTimer?.cancel()
+        tickTimer = nil
         try queue.sync {
             // Commit whatever's left (zero-pad shorter channel).
             self.flushAll()
@@ -49,17 +67,31 @@ public final class AudioMixer: @unchecked Sendable {
         }
     }
 
-    /// Commits the longest prefix that all enabled channels have, mixed by simple sum.
-    /// If one enabled channel is silent past timeout, treat its missing samples as zero.
+    /// Commit the longest prefix that all *currently active* enabled channels share.
+    /// A channel is "active" if it produced samples in the last silenceTimeoutSeconds.
+    /// Silent channels contribute zeros up to the chosen length, so an idle system-audio
+    /// stream doesn't stall the mic stream.
     private func flushIfPossible() {
         let now = Date()
-        let counts = enabledChannels.map { ch -> Int in
+        var activeCounts: [Int] = []
+        var anyHasData = false
+        for ch in enabledChannels {
             let raw = buffers[ch.rawValue].count
-            let silent = now.timeIntervalSince(lastActivity[ch.rawValue]) > silenceTimeoutSeconds
-            return silent ? Int.max : raw
+            if raw > 0 { anyHasData = true }
+            let active = now.timeIntervalSince(lastActivity[ch.rawValue]) <= silenceTimeoutSeconds
+            if active { activeCounts.append(raw) }
         }
-        let commit = counts.min() ?? 0
-        guard commit > 0, commit != Int.max else { return }
+        guard anyHasData else { return }
+        // If at least one channel is active, the prefix length is the smallest active
+        // count (so we don't read ahead of an active source). If everyone is silent but
+        // some buffered data remains, drain the longest buffer.
+        let commit: Int
+        if let activeMin = activeCounts.min(), activeMin > 0 {
+            commit = activeMin
+        } else {
+            commit = enabledChannels.map { buffers[$0.rawValue].count }.max() ?? 0
+        }
+        guard commit > 0 else { return }
         commitPrefix(length: commit)
     }
 
