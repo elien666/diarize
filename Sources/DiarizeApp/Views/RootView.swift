@@ -46,6 +46,13 @@ struct RootView: View {
         .onChange(of: searchQuery) { _, new in
             if new.isEmpty { showingSearch = false }
         }
+        .alert(item: $library.errorAlert) { err in
+            Alert(
+                title: Text(err.title),
+                message: Text(err.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 }
 

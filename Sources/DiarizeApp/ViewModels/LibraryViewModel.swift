@@ -12,6 +12,18 @@ final class LibraryViewModel: ObservableObject {
     @Published var sidebarSection: SidebarSection = .recordings
     @Published var importInProgress: Bool = false
     @Published var statusMessage: String = ""
+    @Published var errorAlert: ErrorAlert?
+
+    struct ErrorAlert: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
+    }
+
+    func presentError(title: String, message: String) {
+        errorAlert = ErrorAlert(title: title, message: message)
+        statusMessage = title
+    }
 
     let config: AppConfig
     let store: SpeakerStore
@@ -102,14 +114,33 @@ final class LibraryViewModel: ObservableObject {
                     try await recorder.start()
                 } catch {
                     await MainActor.run {
-                        self.statusMessage = "Aufnahme-Fehler: \(error.localizedDescription)"
                         self.cleanupRecorder()
+                        self.presentError(
+                            title: "Aufnahme konnte nicht gestartet werden",
+                            message: Self.formatRecorderError(error)
+                        )
                     }
                 }
             }
         } catch {
-            statusMessage = "Aufnahme-Fehler: \(error.localizedDescription)"
+            cleanupRecorder()
+            presentError(
+                title: "Aufnahme konnte nicht gestartet werden",
+                message: Self.formatRecorderError(error)
+            )
         }
+    }
+
+    private static func formatRecorderError(_ error: Error) -> String {
+        let base = error.localizedDescription
+        let hint = """
+
+        Mögliche Ursachen:
+        • Mikrofon-Berechtigung nicht erteilt → Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon
+        • Bildschirmaufnahme-Berechtigung nicht erteilt (für System-Audio) → Systemeinstellungen → Datenschutz & Sicherheit → Bildschirm- & Systemaudio-Aufnahme
+        • App startest du als swift-run-Binary statt als .app-Bundle — macOS kann der nicht-bundlete Binary keine dauerhafte Berechtigung zuordnen. Baue die .app mit ./Scripts/build-app.sh.
+        """
+        return base + hint
     }
 
     func stopRecordingAndTranscribe() {
