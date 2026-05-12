@@ -44,7 +44,8 @@ struct SpeakerDetailView: View {
     }
 
     private var actionsBar: some View {
-        HStack(spacing: 8) {
+        let segCount = library.segmentCount(speakerId: speaker.id)
+        return HStack(spacing: 8) {
             TextField("Sprecher-Name", text: $newLabel)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 220)
@@ -61,6 +62,15 @@ struct SpeakerDetailView: View {
                 }
             }
             .frame(maxWidth: 220)
+            Button(role: .destructive) {
+                library.deleteSpeakerIfEmpty(speaker.id)
+            } label: {
+                Label("Löschen", systemImage: "trash")
+            }
+            .disabled(segCount > 0)
+            .help(segCount > 0
+                  ? "Nur löschbar, wenn keine Segmente diesen Sprecher referenzieren (\(segCount) vorhanden — vorher mergen)"
+                  : "Sprecher und Embeddings entfernen")
         }
         .padding(.vertical, 8)
     }

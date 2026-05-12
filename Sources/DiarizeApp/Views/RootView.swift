@@ -25,7 +25,10 @@ struct RootView: View {
                 } label: {
                     Label("Aufnahme hinzufügen", systemImage: "plus")
                 }
-                .disabled(library.importInProgress)
+                .disabled(library.importInProgress || library.isRecording)
+            }
+            ToolbarItem(placement: .navigation) {
+                RecordToolbarControl()
             }
             ToolbarItem(placement: .status) {
                 HStack(spacing: 6) {
