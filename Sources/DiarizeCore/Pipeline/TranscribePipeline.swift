@@ -52,7 +52,7 @@ public final class TranscribePipeline {
         progress.step("Hash: \(String(hash.prefix(12))) …")
 
         if duplicatePolicy == .skip, let existing = try store.recording(sourceHash: hash) {
-            progress.step("Bereits transkribiert (\(existing.id)) — überspringe. Erneut mit --force erzwingen.")
+            progress.step("Bereits transkribiert (\(existing.id)) — überspringe.")
             let segs = try store.segments(for: existing.id)
             return TranscribeOutput(
                 recording: existing,
@@ -65,97 +65,204 @@ public final class TranscribePipeline {
             )
         }
 
-        progress.step("Lade Audio …")
-        let audio = try AudioLoader.load(url: audioPath)
-
-        progress.step("Lade Diarization-Modelle …")
-        let diarizer = DiarizationPipeline()
-        try await diarizer.prepareModels()
-
-        progress.step("Diarisierung läuft …")
-        let diarization = try await diarizer.diarize(samples: audio.samples)
-        progress.step("Diarisiert: \(diarization.segments.count) Segmente, \(diarization.speakerCentroids.count) lokale Sprecher")
-
-        progress.step("Sprecher-Matching …")
-        let matcher = try SpeakerMatcher(store: store, threshold: config.similarityThreshold)
-        var localToGlobal: [String: String] = [:]
-        var newIds: [String] = []
-        var matchedIds: [String] = []
-        var pendingEmbeddingIds: [Int64] = []
-        let recordingId = "rec_" + UUID().uuidString
-
-        for (localId, centroid) in diarization.speakerCentroids {
-            let result = try matcher.matchOrCreate(centroid: centroid, recordingId: nil, segmentRange: nil)
-            localToGlobal[localId] = result.speakerId
-            pendingEmbeddingIds.append(result.embeddingId)
-            if result.isNew {
-                newIds.append(result.speakerId)
-            } else {
-                matchedIds.append(result.speakerId)
-            }
-        }
-
-        progress.step("Lade ASR-Modelle …")
-        let asr = TranscriptionPipeline(progress: progress)
-        let modelVersion: AsrModelVersion = (lang == .en) ? .v2 : .v3
-        try await asr.loadModels(version: modelVersion)
-
-        progress.step("Transkribiere \(diarization.segments.count) Segmente …")
-        let asrLang: Language? = (modelVersion == .v3) ? TranscriptionPipeline.language(for: lang) : nil
-        let transcribed = try await asr.transcribe(
-            diarized: diarization.segments,
-            samples: audio.samples,
-            sampleRate: audio.sampleRate,
-            language: asrLang
-        )
-
-        let segments: [RecordingSegment] = transcribed.map { seg in
-            RecordingSegment(
-                recordingId: recordingId,
-                speakerId: localToGlobal[seg.localSpeakerId],
-                startSec: seg.startSec,
-                endSec: seg.endSec,
-                text: seg.text,
-                confidence: seg.confidence
-            )
-        }
-
+        // Create stub recording up-front so it appears in the UI immediately.
         let createdAt = Date()
         let baseName = makeFileBaseName(title: title, date: createdAt)
         let mdPath = config.transcriptsDir.appendingPathComponent("\(baseName).md")
         let jsonPath = config.transcriptsDir.appendingPathComponent("\(baseName).json")
+        let recordingId = "rec_" + UUID().uuidString
 
-        let recording = Recording(
+        let stub = Recording(
             id: recordingId,
             title: title,
             sourcePath: audioPath.path,
-            durationSec: audio.durationSec,
+            durationSec: 0,
             language: lang.rawValue,
             transcriptMd: mdPath.path,
             transcriptJson: jsonPath.path,
             createdAt: createdAt,
-            sourceHash: hash
+            sourceHash: hash,
+            processingState: .analyzing
         )
+        try store.upsertRecording(stub)
 
-        progress.step("Persistiere & rendere Transkripte …")
-        try writeTranscripts(recording: recording, segments: segments, durationSec: audio.durationSec, lang: lang.rawValue, title: title, mdPath: mdPath, jsonPath: jsonPath, createdAt: createdAt)
-
-        try store.insertRecording(recording, segments: segments)
-        try store.annotateEmbeddings(ids: pendingEmbeddingIds, recordingId: recordingId)
-
-        return TranscribeOutput(
-            recording: recording,
-            segments: segments,
-            markdownPath: mdPath,
+        return try await analyze(
+            existingRecording: stub,
+            audioPath: audioPath,
+            language: lang,
+            mdPath: mdPath,
             jsonPath: jsonPath,
-            newSpeakerIds: newIds,
-            matchedSpeakerIds: matchedIds,
-            skipped: false
+            title: title
         )
     }
 
+    /// Re-analyze a recording row that was created up-front (e.g. by the live-record flow).
+    /// The audio file at `recording.sourcePath` must exist; sourceHash is recomputed.
+    public func analyzeExisting(recordingId: String, language: AppConfig.Language?) async throws -> TranscribeOutput {
+        guard let recording = try store.recording(id: recordingId) else {
+            throw RerenderError.recordingNotFound(recordingId)
+        }
+        try config.ensureDirectories()
+        let lang = language ?? AppConfig.Language(rawValue: recording.language) ?? config.defaultLanguage
+        let audioPath = URL(fileURLWithPath: recording.sourcePath)
+
+        try store.setProcessingState(recordingId: recordingId, state: .analyzing)
+
+        // Recompute hash for the now-finished file (live recording grows during capture).
+        progress.step("Berechne Source-Hash …")
+        if let hash = try? AudioHasher.sha256(of: audioPath) {
+            try store.setSourceHash(recordingId: recordingId, hash: hash)
+        }
+
+        let mdPath = URL(fileURLWithPath: recording.transcriptMd)
+        let jsonPath = URL(fileURLWithPath: recording.transcriptJson)
+
+        // Reload to get the latest hash etc.
+        let refreshed = try store.recording(id: recordingId) ?? recording
+
+        return try await analyze(
+            existingRecording: refreshed,
+            audioPath: audioPath,
+            language: lang,
+            mdPath: mdPath,
+            jsonPath: jsonPath,
+            title: refreshed.title
+        )
+    }
+
+    private func analyze(
+        existingRecording stub: Recording,
+        audioPath: URL,
+        language lang: AppConfig.Language,
+        mdPath: URL,
+        jsonPath: URL,
+        title: String?
+    ) async throws -> TranscribeOutput {
+        do {
+            progress.step("Lade Audio …")
+            let audio = try AudioLoader.load(url: audioPath)
+            try store.updateRecordingDuration(id: stub.id, durationSec: audio.durationSec)
+
+            progress.step("Lade Diarization-Modelle …")
+            let diarizer = DiarizationPipeline()
+            try await diarizer.prepareModels()
+
+            progress.step("Diarisierung läuft …")
+            let diarization = try await diarizer.diarize(samples: audio.samples)
+            progress.step("Diarisiert: \(diarization.segments.count) Segmente, \(diarization.speakerCentroids.count) lokale Sprecher")
+
+            // No speech → mark empty and write an empty transcript.
+            guard !diarization.segments.isEmpty else {
+                try store.setProcessingState(recordingId: stub.id, state: .empty)
+                try writeTranscripts(
+                    recording: stub,
+                    segments: [],
+                    durationSec: audio.durationSec,
+                    lang: lang.rawValue,
+                    title: title,
+                    mdPath: mdPath,
+                    jsonPath: jsonPath,
+                    createdAt: stub.createdAt
+                )
+                return TranscribeOutput(
+                    recording: try store.recording(id: stub.id) ?? stub,
+                    segments: [],
+                    markdownPath: mdPath,
+                    jsonPath: jsonPath,
+                    newSpeakerIds: [],
+                    matchedSpeakerIds: [],
+                    skipped: false
+                )
+            }
+
+            progress.step("Sprecher-Matching …")
+            let matcher = try SpeakerMatcher(store: store, threshold: config.similarityThreshold)
+            var localToGlobal: [String: String] = [:]
+            var newIds: [String] = []
+            var matchedIds: [String] = []
+            var pendingEmbeddingIds: [Int64] = []
+
+            for (localId, centroid) in diarization.speakerCentroids {
+                let result = try matcher.matchOrCreate(centroid: centroid, recordingId: nil, segmentRange: nil)
+                localToGlobal[localId] = result.speakerId
+                pendingEmbeddingIds.append(result.embeddingId)
+                if result.isNew { newIds.append(result.speakerId) } else { matchedIds.append(result.speakerId) }
+            }
+
+            progress.step("Lade ASR-Modelle …")
+            let asr = TranscriptionPipeline(progress: progress)
+            let modelVersion: AsrModelVersion = (lang == .en) ? .v2 : .v3
+            try await asr.loadModels(version: modelVersion)
+
+            progress.step("Transkribiere \(diarization.segments.count) Segmente …")
+            let asrLang: Language? = (modelVersion == .v3) ? TranscriptionPipeline.language(for: lang) : nil
+            let transcribed = try await asr.transcribe(
+                diarized: diarization.segments,
+                samples: audio.samples,
+                sampleRate: audio.sampleRate,
+                language: asrLang
+            )
+
+            let segments: [RecordingSegment] = transcribed.map { seg in
+                RecordingSegment(
+                    recordingId: stub.id,
+                    speakerId: localToGlobal[seg.localSpeakerId],
+                    startSec: seg.startSec,
+                    endSec: seg.endSec,
+                    text: seg.text,
+                    confidence: seg.confidence
+                )
+            }
+
+            // Replace existing segments (idempotent re-analysis)
+            try store.replaceSegments(recordingId: stub.id, with: segments)
+            try store.annotateEmbeddings(ids: pendingEmbeddingIds, recordingId: stub.id)
+
+            let finalState: RecordingProcessingState = segments.isEmpty ? .empty : .done
+            try store.setProcessingState(recordingId: stub.id, state: finalState)
+
+            let final = try store.recording(id: stub.id) ?? stub
+
+            progress.step("Persistiere & rendere Transkripte …")
+            try writeTranscripts(
+                recording: final,
+                segments: segments,
+                durationSec: audio.durationSec,
+                lang: lang.rawValue,
+                title: title,
+                mdPath: mdPath,
+                jsonPath: jsonPath,
+                createdAt: stub.createdAt
+            )
+
+            return TranscribeOutput(
+                recording: final,
+                segments: segments,
+                markdownPath: mdPath,
+                jsonPath: jsonPath,
+                newSpeakerIds: newIds,
+                matchedSpeakerIds: matchedIds,
+                skipped: false
+            )
+        } catch let error as ASRError where error.localizedDescription.lowercased().contains("no speech") {
+            // Treat "no speech" as empty, not failed — keeps the recording usable for playback.
+            try? store.setProcessingState(recordingId: stub.id, state: .empty)
+            return TranscribeOutput(
+                recording: try store.recording(id: stub.id) ?? stub,
+                segments: [],
+                markdownPath: mdPath,
+                jsonPath: jsonPath,
+                newSpeakerIds: [],
+                matchedSpeakerIds: [],
+                skipped: false
+            )
+        } catch {
+            try? store.setProcessingState(recordingId: stub.id, state: .failed, errorMessage: error.localizedDescription)
+            throw error
+        }
+    }
+
     /// Re-render Markdown + JSON for an existing recording using the current speaker labels.
-    /// No model invocation, no DB writes besides updating transcript paths if they changed.
     public func rerender(recordingId: String) throws -> TranscribeOutput {
         guard let recording = try store.recording(id: recordingId) else {
             throw RerenderError.recordingNotFound(recordingId)

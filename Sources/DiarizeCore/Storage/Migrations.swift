@@ -85,5 +85,12 @@ enum Migrations {
                 END;
             """)
         }
+
+        migrator.registerMigration("v4_recording_processing_state") { db in
+            try db.alter(table: "recordings") { t in
+                t.add(column: "processingState", .text).notNull().defaults(to: "done")
+                t.add(column: "errorMessage", .text)
+            }
+        }
     }
 }

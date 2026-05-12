@@ -198,9 +198,58 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    public func replaceSegments(recordingId: String, with segments: [RecordingSegment]) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM recording_segments WHERE recordingId = ?", arguments: [recordingId])
+            for seg in segments {
+                var s = seg
+                try s.insert(db)
+            }
+        }
+    }
+
     public func deleteRecording(id: String) throws {
         try dbQueue.write { db in
             _ = try Recording.deleteOne(db, key: id)
+        }
+    }
+
+    public func insertEmptyRecording(_ recording: Recording) throws {
+        try dbQueue.write { db in
+            var r = recording
+            try r.insert(db)
+        }
+    }
+
+    public func upsertRecording(_ recording: Recording) throws {
+        try dbQueue.write { db in
+            var r = recording
+            try r.save(db)
+            // Belt-and-suspenders for sourceHash (see insertRecording)
+            if let hash = recording.sourceHash {
+                try db.execute(
+                    sql: "UPDATE recordings SET sourceHash = ? WHERE id = ?",
+                    arguments: [hash, recording.id]
+                )
+            }
+        }
+    }
+
+    public func setProcessingState(recordingId: String, state: RecordingProcessingState, errorMessage: String? = nil) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE recordings SET processingState = ?, errorMessage = ? WHERE id = ?",
+                arguments: [state.rawValue, errorMessage, recordingId]
+            )
+        }
+    }
+
+    public func updateRecordingDuration(id: String, durationSec: Double) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE recordings SET durationSec = ? WHERE id = ?",
+                arguments: [durationSec, id]
+            )
         }
     }
 

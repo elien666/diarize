@@ -64,9 +64,12 @@ struct RecordingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(recording.title ?? "Aufnahme")
-                .font(.body)
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                stateIndicator
+                Text(recording.title ?? "Aufnahme")
+                    .font(.body)
+                    .lineLimit(1)
+            }
             HStack(spacing: 8) {
                 Text(recording.createdAt, style: .date)
                 Text("·")
@@ -76,6 +79,24 @@ struct RecordingRow: View {
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var stateIndicator: some View {
+        switch recording.processingState {
+        case .recording:
+            Image(systemName: "record.circle")
+                .foregroundStyle(.red)
+                .symbolEffect(.pulse, isActive: true)
+        case .analyzing:
+            ProgressView().controlSize(.mini)
+        case .empty:
+            Image(systemName: "text.bubble").foregroundStyle(.tertiary)
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        case .done:
+            EmptyView()
         }
     }
 

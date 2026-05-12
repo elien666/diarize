@@ -63,6 +63,14 @@ public struct SpeakerEmbedding: Codable, FetchableRecord, MutablePersistableReco
     }
 }
 
+public enum RecordingProcessingState: String, Codable, Sendable, CaseIterable {
+    case recording      // live capture in progress
+    case analyzing      // diarization + ASR running
+    case done           // transcript exists
+    case empty          // pipeline completed but no speech found
+    case failed         // pipeline errored
+}
+
 public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
     public var id: String
     public var title: String?
@@ -73,10 +81,24 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
     public var transcriptJson: String
     public var createdAt: Date
     public var sourceHash: String?
+    public var processingState: RecordingProcessingState
+    public var errorMessage: String?
 
     public static let databaseTableName = "recordings"
 
-    public init(id: String = "rec_" + UUID().uuidString, title: String?, sourcePath: String, durationSec: Double, language: String, transcriptMd: String, transcriptJson: String, createdAt: Date = Date(), sourceHash: String? = nil) {
+    public init(
+        id: String = "rec_" + UUID().uuidString,
+        title: String?,
+        sourcePath: String,
+        durationSec: Double,
+        language: String,
+        transcriptMd: String,
+        transcriptJson: String,
+        createdAt: Date = Date(),
+        sourceHash: String? = nil,
+        processingState: RecordingProcessingState = .done,
+        errorMessage: String? = nil
+    ) {
         self.id = id
         self.title = title
         self.sourcePath = sourcePath
@@ -86,6 +108,8 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
         self.transcriptJson = transcriptJson
         self.createdAt = createdAt
         self.sourceHash = sourceHash
+        self.processingState = processingState
+        self.errorMessage = errorMessage
     }
 }
 

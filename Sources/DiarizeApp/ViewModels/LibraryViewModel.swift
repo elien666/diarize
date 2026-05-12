@@ -83,7 +83,7 @@ final class LibraryViewModel: ObservableObject {
 
     // MARK: - Live recording state
 
-    @Published var isRecording: Bool = false
+    @Published var activeRecordingId: String?      // recording row id while live
     @Published var recordingElapsedSec: Double = 0
     @Published var recordingSourcesLabel: String = ""
     private var activeRecorder: AudioRecorder?
@@ -91,43 +91,81 @@ final class LibraryViewModel: ObservableObject {
     private var recordingTimer: Timer?
     private var recordingOutputURL: URL?
 
+    var isRecording: Bool { activeRecordingId != nil }
+
     func startRecording(sources: Set<AudioRecorder.Source>) {
         guard !isRecording else { return }
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd-HHmmss"
-        let outputURL = config.recordingsDir.appendingPathComponent("rec-\(f.string(from: Date())).wav")
+        let stamp = f.string(from: Date())
+        let outputURL = config.recordingsDir.appendingPathComponent("rec-\(stamp).wav")
         try? FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
+        let recorder: AudioRecorder
         do {
-            let recorder = try AudioRecorder(config: AudioRecorder.Config(sources: sources, outputURL: outputURL))
-            self.activeRecorder = recorder
-            self.recordingOutputURL = outputURL
-            self.recordingSourcesLabel = sources.map { $0.rawValue }.sorted().joined(separator: "+")
-            self.statusMessage = "Aufnahme läuft (\(recordingSourcesLabel)) …"
-            self.isRecording = true
-            self.recordingStartedAt = Date()
-            self.recordingElapsedSec = 0
-            startTimer()
-
-            Task {
-                do {
-                    try await recorder.start()
-                } catch {
-                    await MainActor.run {
-                        self.cleanupRecorder()
-                        self.presentError(
-                            title: "Aufnahme konnte nicht gestartet werden",
-                            message: Self.formatRecorderError(error)
-                        )
-                    }
-                }
-            }
+            recorder = try AudioRecorder(config: AudioRecorder.Config(sources: sources, outputURL: outputURL))
         } catch {
-            cleanupRecorder()
             presentError(
                 title: "Aufnahme konnte nicht gestartet werden",
                 message: Self.formatRecorderError(error)
             )
+            return
+        }
+
+        // Create the Recording row immediately so it appears in the sidebar.
+        let recordingId = "rec_" + UUID().uuidString
+        let title = "Aufnahme \(humanTimestamp(Date()))"
+        let baseName = "\(stamp)-aufnahme"
+        let mdPath = config.transcriptsDir.appendingPathComponent("\(baseName).md")
+        let jsonPath = config.transcriptsDir.appendingPathComponent("\(baseName).json")
+        let stub = Recording(
+            id: recordingId,
+            title: title,
+            sourcePath: outputURL.path,
+            durationSec: 0,
+            language: config.defaultLanguage.rawValue,
+            transcriptMd: mdPath.path,
+            transcriptJson: jsonPath.path,
+            createdAt: Date(),
+            sourceHash: nil,
+            processingState: .recording
+        )
+        do {
+            try store.insertEmptyRecording(stub)
+        } catch {
+            presentError(
+                title: "Konnte Aufnahme nicht in der Datenbank anlegen",
+                message: error.localizedDescription
+            )
+            return
+        }
+
+        self.activeRecorder = recorder
+        self.recordingOutputURL = outputURL
+        self.recordingSourcesLabel = sources.map { $0.rawValue }.sorted().joined(separator: "+")
+        self.statusMessage = "Aufnahme läuft (\(recordingSourcesLabel)) …"
+        self.activeRecordingId = recordingId
+        self.recordingStartedAt = Date()
+        self.recordingElapsedSec = 0
+        startTimer()
+        reload()
+        openRecording(recordingId)
+
+        Task {
+            do {
+                try await recorder.start()
+            } catch {
+                await MainActor.run {
+                    let id = self.activeRecordingId
+                    self.cleanupRecorder()
+                    if let id { try? self.store.deleteRecording(id: id) }
+                    self.reload()
+                    self.presentError(
+                        title: "Aufnahme konnte nicht gestartet werden",
+                        message: Self.formatRecorderError(error)
+                    )
+                }
+            }
         }
     }
 
@@ -144,26 +182,79 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func stopRecordingAndTranscribe() {
-        guard isRecording, let recorder = activeRecorder, let url = recordingOutputURL else { return }
-        let title = "Aufnahme \(formatStartTime())"
+        guard let recorder = activeRecorder, let recordingId = activeRecordingId else { return }
         statusMessage = "Stoppe Aufnahme …"
         Task {
             try? await recorder.stop()
             await MainActor.run {
                 self.cleanupRecorder()
-                self.transcribe(audioURL: url, title: title)
+                self.reload()
+                self.analyzeRecording(recordingId: recordingId)
             }
         }
     }
 
     func cancelRecording() {
-        guard isRecording, let recorder = activeRecorder, let url = recordingOutputURL else { return }
+        guard let recorder = activeRecorder, let url = recordingOutputURL, let recordingId = activeRecordingId else { return }
         statusMessage = "Aufnahme verworfen."
         Task {
             try? await recorder.stop()
             try? FileManager.default.removeItem(at: url)
-            await MainActor.run { self.cleanupRecorder() }
+            await MainActor.run {
+                self.cleanupRecorder()
+                try? self.store.deleteRecording(id: recordingId)
+                if self.selectedRecordingId == recordingId { self.selectedRecordingId = nil }
+                self.reload()
+            }
         }
+    }
+
+    /// Run the analysis pipeline against an existing recording row (created during live capture).
+    private func analyzeRecording(recordingId: String) {
+        importInProgress = true
+        statusMessage = "Analysiere …"
+        let config = self.config
+        let store = self.store
+        let progress = AppProgress { [weak self] msg in
+            Task { @MainActor in self?.statusMessage = msg }
+        }
+        Task { @MainActor in
+            do {
+                let result = try await Self.runAnalyze(
+                    config: config,
+                    store: store,
+                    progress: progress,
+                    recordingId: recordingId
+                )
+                self.importInProgress = false
+                self.statusMessage = result.recording.processingState == .empty
+                    ? "Aufnahme fertig — keine Sprache erkannt."
+                    : "✓ Fertig: \(result.recording.id)"
+                self.reload()
+            } catch {
+                self.importInProgress = false
+                self.statusMessage = "Analyse-Fehler: \(error.localizedDescription)"
+                self.reload()
+                self.presentError(
+                    title: "Analyse fehlgeschlagen",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    func retryAnalysis(recordingId: String) {
+        analyzeRecording(recordingId: recordingId)
+    }
+
+    private nonisolated static func runAnalyze(
+        config: AppConfig,
+        store: SpeakerStore,
+        progress: ProgressReporter,
+        recordingId: String
+    ) async throws -> TranscribeOutput {
+        let pipeline = TranscribePipeline(config: config, store: store, progress: progress)
+        return try await pipeline.analyzeExisting(recordingId: recordingId, language: nil)
     }
 
     private func startTimer() {
@@ -184,13 +275,13 @@ final class LibraryViewModel: ObservableObject {
         recordingStartedAt = nil
         recordingSourcesLabel = ""
         recordingElapsedSec = 0
-        isRecording = false
+        activeRecordingId = nil
     }
 
-    private func formatStartTime() -> String {
+    private func humanTimestamp(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f.string(from: recordingStartedAt ?? Date())
+        return f.string(from: date)
     }
 
     // MARK: - Speaker delete (only if no segments)

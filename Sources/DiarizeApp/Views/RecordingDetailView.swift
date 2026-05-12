@@ -9,19 +9,18 @@ struct RecordingDetailView: View {
     @State private var segments: [RecordingSegment] = []
     @State private var renamingSpeakerId: String?
     @State private var renameDraft: String = ""
-    @State private var jumpToSegmentId: Int64?
+
+    private var isLiveRecording: Bool {
+        recording.processingState == .recording
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            playerBar
+            controlBar
             Divider()
-            if segments.isEmpty {
-                emptyTranscriptState
-            } else {
-                transcript
-            }
+            content
         }
         .onAppear {
             reload()
@@ -30,13 +29,166 @@ struct RecordingDetailView: View {
         }
         .onChange(of: recording.id) { _, _ in
             reload()
-            // Reset to start even if it's the same audio file (different recording entry).
             player.pause()
             player.seek(to: 0)
             loadAudioIfNeeded()
             consumePendingJump()
         }
+        .onChange(of: recording.processingState) { _, _ in reload() }
         .onChange(of: library.pendingJumpSec) { _, _ in consumePendingJump() }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(recording.title ?? "Aufnahme")
+                    .font(.title2.weight(.semibold))
+                StateBadge(state: recording.processingState)
+            }
+            HStack(spacing: 12) {
+                Text(recording.createdAt, format: .dateTime.year().month().day().hour().minute())
+                Text("·")
+                Text(formatDuration(recording.durationSec))
+                if recording.processingState == .done {
+                    Text("·")
+                    Text(recording.language.uppercased())
+                    Text("·")
+                    Text("\(uniqueSpeakers().count) Sprecher")
+                }
+                Spacer()
+                if recording.processingState == .done {
+                    Button("Markdown öffnen") {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding()
+    }
+
+    // MARK: - Control bar (player OR live recording controls)
+
+    @ViewBuilder
+    private var controlBar: some View {
+        if isLiveRecording {
+            liveRecordingBar
+        } else {
+            playerBar
+        }
+    }
+
+    private var liveRecordingBar: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(.red)
+                .frame(width: 12, height: 12)
+                .opacity(0.4)
+                .overlay(Circle().stroke(.red))
+            Text(formatDuration(library.recordingElapsedSec))
+                .monospacedDigit()
+                .font(.title3.weight(.medium))
+            Text(library.recordingSourcesLabel)
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            Spacer()
+            Button(role: .destructive) {
+                library.cancelRecording()
+            } label: {
+                Label("Verwerfen", systemImage: "trash")
+            }
+            Button {
+                library.stopRecordingAndTranscribe()
+            } label: {
+                Label("Stop & Analysieren", systemImage: "stop.circle.fill")
+                    .foregroundStyle(.red)
+            }
+            .keyboardShortcut("s", modifiers: .command)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 12)
+    }
+
+    private var playerBar: some View {
+        HStack(spacing: 12) {
+            Button { player.togglePlay() } label: {
+                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .disabled(player.duration <= 0)
+
+            Slider(value: Binding(
+                get: { player.currentTime },
+                set: { player.seek(to: $0) }
+            ), in: 0...max(player.duration, 1)) {
+                Text("Zeit")
+            }
+            .disabled(player.duration <= 0)
+            Text("\(formatDuration(player.currentTime)) / \(formatDuration(player.duration))")
+                .monospacedDigit()
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var content: some View {
+        switch recording.processingState {
+        case .recording:
+            recordingState
+        case .analyzing:
+            analyzingState
+        case .empty:
+            emptyTranscriptState
+        case .failed:
+            failedState
+        case .done:
+            if segments.isEmpty {
+                emptyTranscriptState
+            } else {
+                transcript
+            }
+        }
+    }
+
+    private var recordingState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "waveform.badge.mic")
+                .font(.system(size: 56))
+                .foregroundStyle(.red)
+                .symbolEffect(.variableColor.iterative, isActive: true)
+            Text("Aufnahme läuft")
+                .font(.headline)
+            Text("Beende die Aufnahme oben mit Stop & Analysieren.\nDanach werden Diarisierung und Transkription ausgeführt.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+    }
+
+    private var analyzingState: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .controlSize(.large)
+            Text("Analyse läuft …")
+                .font(.headline)
+            Text(library.statusMessage.isEmpty ? "Diarisierung und Transkription dauern bei einer Stunde Audio etwa eine Minute." : library.statusMessage)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 480)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     private var emptyTranscriptState: some View {
@@ -46,7 +198,7 @@ struct RecordingDetailView: View {
                 .foregroundStyle(.tertiary)
             Text("Kein Transkript")
                 .font(.headline)
-            Text("Bei dieser Aufnahme wurde keine Sprache erkannt.\nDu kannst sie unten trotzdem abspielen.")
+            Text("In dieser Aufnahme wurde keine Sprache erkannt.\nDu kannst sie oben trotzdem abspielen.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
@@ -68,64 +220,35 @@ struct RecordingDetailView: View {
         .padding()
     }
 
-    private func consumePendingJump() {
-        guard let target = library.pendingJumpSec else { return }
-        loadAudioIfNeeded()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            player.seek(to: target)
-            player.play()
-            library.pendingJumpSec = nil
-        }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(recording.title ?? "Aufnahme")
-                .font(.title2.weight(.semibold))
-            HStack(spacing: 12) {
-                Text(recording.createdAt, format: .dateTime.year().month().day().hour().minute())
-                Text("·")
-                Text(formatDuration(recording.durationSec))
-                Text("·")
-                Text(recording.language.uppercased())
-                Text("·")
-                Text("\(uniqueSpeakers().count) Sprecher")
-                Spacer()
-                Button("Markdown öffnen") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
-                }
-                .controlSize(.small)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .padding()
-    }
-
-    private var playerBar: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 12) {
-                Button { player.togglePlay() } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title3)
-                }
-                .buttonStyle(.borderless)
-
-                Slider(value: Binding(
-                    get: { player.currentTime },
-                    set: { player.seek(to: $0) }
-                ), in: 0...max(player.duration, 1)) {
-                    Text("Zeit")
-                }
-                Text("\(formatDuration(player.currentTime)) / \(formatDuration(player.duration))")
-                    .monospacedDigit()
-                    .font(.caption)
+    private var failedState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 48))
+                .foregroundStyle(.orange)
+            Text("Analyse fehlgeschlagen")
+                .font(.headline)
+            if let msg = recording.errorMessage, !msg.isEmpty {
+                Text(msg)
+                    .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: 600)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    library.retryAnalysis(recordingId: recording.id)
+                } label: {
+                    Label("Erneut versuchen", systemImage: "arrow.clockwise")
+                }
+                Button(role: .destructive) {
+                    library.deleteRecording(recording.id)
+                } label: {
+                    Label("Aufnahme löschen", systemImage: "trash")
+                }
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .onAppear { loadAudioIfNeeded() }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 
     private var transcript: some View {
@@ -170,7 +293,17 @@ struct RecordingDetailView: View {
         }
     }
 
-    // MARK: helpers
+    // MARK: - Helpers
+
+    private func consumePendingJump() {
+        guard let target = library.pendingJumpSec else { return }
+        loadAudioIfNeeded()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            player.seek(to: target)
+            player.play()
+            library.pendingJumpSec = nil
+        }
+    }
 
     private func reload() {
         segments = library.segments(for: recording.id)
@@ -204,6 +337,41 @@ struct RecordingDetailView: View {
         let m = (total % 3600) / 60
         let s = total % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+}
+
+struct StateBadge: View {
+    let state: RecordingProcessingState
+    var body: some View {
+        switch state {
+        case .recording:
+            Label("Aufnahme", systemImage: "record.circle")
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.red.opacity(0.2)).foregroundStyle(.red)
+                .font(.caption2.weight(.semibold))
+                .clipShape(Capsule())
+        case .analyzing:
+            Label("Analyse", systemImage: "circle.dotted")
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.blue.opacity(0.2)).foregroundStyle(.blue)
+                .font(.caption2.weight(.semibold))
+                .clipShape(Capsule())
+        case .empty:
+            Label("Kein Transkript", systemImage: "text.bubble")
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.gray.opacity(0.2)).foregroundStyle(.secondary)
+                .font(.caption2.weight(.semibold))
+                .clipShape(Capsule())
+        case .failed:
+            Label("Fehlgeschlagen", systemImage: "exclamationmark.triangle")
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(.orange.opacity(0.2)).foregroundStyle(.orange)
+                .font(.caption2.weight(.semibold))
+                .clipShape(Capsule())
+        case .done:
+            EmptyView()
+        }
     }
 }
 
