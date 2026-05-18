@@ -69,15 +69,27 @@ cat > "$CONTENTS/Info.plist" <<EOF
 </plist>
 EOF
 
+
+# ── Code signing ───────────────────────────────────────────────────────────────
+# TCC (Privacy permissions) tracks apps by their "designated requirement" (DR).
+# Ad-hoc signing without an explicit DR defaults to the binary hash, which
+# changes on every build → permissions reset every time.
+#
+# Fix: pin the DR to the bundle identifier. This is stable across rebuilds
+# regardless of whether a named identity exists in the keychain.
+DR="identifier \"$BUNDLE_ID\""
+
 SIGN_IDENTITY="Diarize Local Dev"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$SIGN_IDENTITY\""; then
-    echo "→ Code signing with '$SIGN_IDENTITY' (stable identity → permissions persist across rebuilds)"
-    codesign --force --sign "$SIGN_IDENTITY" --deep --timestamp=none "$APP_DIR"
+    echo "→ Code signing with '$SIGN_IDENTITY'"
+    codesign --force --sign "$SIGN_IDENTITY" \
+        --requirements "=designated => $DR" \
+        --deep --timestamp=none "$APP_DIR"
 else
-    echo "⚠ No stable identity '$SIGN_IDENTITY' found in keychain — falling back to ad-hoc."
-    echo "   macOS permissions will reset on every rebuild."
-    echo "   Tip: run ./Scripts/setup-signing-identity.sh for stable permissions."
-    codesign --force --sign - --deep --timestamp=none "$APP_DIR"
+    echo "→ Code signing (ad-hoc with stable bundle-ID designated requirement)"
+    codesign --force --sign - \
+        --requirements "=designated => $DR" \
+        --deep --timestamp=none "$APP_DIR"
 fi
 
 echo "✓ Built $APP_DIR"
