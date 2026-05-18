@@ -9,6 +9,16 @@ struct RecordingDetailView: View {
     @State private var segments: [RecordingSegment] = []
     @State private var renamingSpeakerId: String?
     @State private var renameDraft: String = ""
+    @State private var pendingMerge: MergeRequest?
+    @State private var pendingDelete = false
+
+    struct MergeRequest: Identifiable {
+        let id = UUID()
+        let fromId: String
+        let fromLabel: String
+        let intoId: String
+        let intoLabel: String
+    }
 
     private var isLiveRecording: Bool {
         recording.processingState == .recording
@@ -43,6 +53,36 @@ struct RecordingDetailView: View {
             }
         }
         .onChange(of: library.pendingJumpSec) { _, _ in consumePendingJump() }
+        .confirmationDialog(
+            "Delete \"\(recording.title ?? "Recording")\"?",
+            isPresented: $pendingDelete
+        ) {
+            Button("Delete Recording & Transcript", role: .destructive) {
+                library.deleteRecording(recording.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The transcript and all speaker assignments for this recording will be permanently deleted. This cannot be undone.")
+        }
+        .confirmationDialog(
+            "Merge speakers?",
+            isPresented: Binding(
+                get: { pendingMerge != nil },
+                set: { if !$0 { pendingMerge = nil } }
+            ),
+            presenting: pendingMerge
+        ) { request in
+            Button("Merge \"\(request.fromLabel)\" into \"\(request.intoLabel)\"", role: .destructive) {
+                library.merge(from: request.fromId, into: request.intoId)
+                pendingMerge = nil
+                reload()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingMerge = nil
+            }
+        } message: { request in
+            Text("All segments and voice data for \"\(request.fromLabel)\" will be permanently merged into \"\(request.intoLabel)\". \"\(request.fromLabel)\" will be removed.")
+        }
     }
 
     // MARK: - Header
@@ -71,7 +111,7 @@ struct RecordingDetailView: View {
                     }
                     .controlSize(.small)
                     Button(role: .destructive) {
-                        library.deleteRecording(recording.id)
+                        pendingDelete = true
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
@@ -142,7 +182,7 @@ struct RecordingDetailView: View {
                 get: { player.currentTime },
                 set: { player.seek(to: $0) }
             ), in: 0...max(player.duration, 1)) {
-                Text("Zeit")
+                Text("Time")
             }
             .disabled(player.duration <= 0)
             Text("\(formatDuration(player.currentTime)) / \(formatDuration(player.duration))")
@@ -296,8 +336,23 @@ struct RecordingDetailView: View {
                             onCancelRename: { renamingSpeakerId = nil },
                             onAssignSpeaker: { newSpeakerId in
                                 if let segId = seg.id {
-                                    library.setSegmentSpeaker(segmentId: segId, to: newSpeakerId)
-                                    reload()
+                                    if let targetId = newSpeakerId,
+                                       let fromId = seg.speakerId,
+                                       fromId != targetId {
+                                        // Assigning to an existing speaker = merge
+                                        let fromLabel = library.speakerLabel(for: fromId)
+                                        let toLabel = library.speakerLabel(for: targetId)
+                                        pendingMerge = MergeRequest(
+                                            fromId: fromId,
+                                            fromLabel: fromLabel,
+                                            intoId: targetId,
+                                            intoLabel: toLabel
+                                        )
+                                    } else {
+                                        // nil = new speaker, or same speaker tapped
+                                        library.setSegmentSpeaker(segmentId: segId, to: newSpeakerId)
+                                        reload()
+                                    }
                                 }
                             },
                             onSplitHere: {
@@ -384,7 +439,7 @@ struct StateBadge: View {
                 .font(.caption2.weight(.semibold))
                 .clipShape(Capsule())
         case .analyzing:
-            Label("Analyse", systemImage: "circle.dotted")
+            Label("Analyzing", systemImage: "circle.dotted")
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(.blue.opacity(0.2)).foregroundStyle(.blue)
                 .font(.caption2.weight(.semibold))
@@ -443,7 +498,7 @@ struct SegmentRow: View {
                             .frame(maxWidth: 200)
                             .onSubmit(onSubmitRename)
                         Button("OK", action: onSubmitRename).controlSize(.small)
-                        Button("Abbrechen", action: onCancelRename).controlSize(.small)
+                        Button("Cancel", action: onCancelRename).controlSize(.small)
                     }
                 } else {
                     HStack(spacing: 6) {
@@ -455,7 +510,7 @@ struct SegmentRow: View {
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(.secondary)
-                            .help("Segment hier teilen (an Player-Position)")
+                            .help("Split segment here (at player position)")
                         }
                     }
                 }
