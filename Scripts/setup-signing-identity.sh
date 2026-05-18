@@ -10,7 +10,8 @@ set -euo pipefail
 IDENTITY_NAME="Diarize Local Dev"
 KEYCHAIN_PATH="$HOME/Library/Keychains/login.keychain-db"
 
-if security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -q "\"$IDENTITY_NAME\""; then
+# ── Already exists? ────────────────────────────────────────────────────────────
+if security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep -q "\"$IDENTITY_NAME\""; then
     echo "✓ Identity '$IDENTITY_NAME' already exists."
     security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "\"$IDENTITY_NAME\""
     exit 0
@@ -41,23 +42,43 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -keyout "$WORK/key.pem" -out "$WORK/cert.pem" \
     -config "$WORK/cert.cnf" >/dev/null 2>&1
 
-# Pack into PKCS#12 (codesign needs cert+key together)
+# Pack into PKCS#12 (codesign needs cert + key together).
+# Use legacy encryption so macOS security import (which uses Apple's own TLS
+# stack) can read it — OpenSSL 3 defaults to AES-256 which macOS rejects.
 PASS="diarize-local-dev"
 openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" \
-    -out "$WORK/identity.p12" -passout "pass:$PASS" -name "$IDENTITY_NAME" >/dev/null 2>&1
+    -out "$WORK/identity.p12" -passout "pass:$PASS" -name "$IDENTITY_NAME" \
+    -legacy >/dev/null 2>&1
 
-# Import into login keychain and grant codesign access
+# Import into login keychain, allow codesign + security tool access
 security import "$WORK/identity.p12" -k "$KEYCHAIN_PATH" \
-    -P "$PASS" -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+    -P "$PASS" -T /usr/bin/codesign -T /usr/bin/security
 
-# Set ACL so codesign can use it without a password prompt
-security set-key-partition-list -S apple-tool:,apple:,codesign: \
-    -s -k "" "$KEYCHAIN_PATH" >/dev/null 2>&1 || true
+# ── Set ACL so codesign can use the key without a password prompt ───────────
+# set-key-partition-list requires the keychain's own unlock password
+# (your macOS login password). We try empty first (works when keychain has no
+# password), then prompt interactively.
+if ! security set-key-partition-list -S apple-tool:,apple:,codesign: \
+       -s -k "" "$KEYCHAIN_PATH" >/dev/null 2>&1; then
+    echo ""
+    echo "  The keychain needs your login password to allow codesign access."
+    echo "  (This is a one-time prompt — the password is not stored anywhere.)"
+    echo -n "  Keychain password: "
+    read -rs KPWD
+    echo ""
+    if ! security set-key-partition-list -S apple-tool:,apple:,codesign: \
+           -s -k "$KPWD" "$KEYCHAIN_PATH" >/dev/null 2>&1; then
+        echo "⚠ Could not set ACL (wrong password or MDM restriction)."
+        echo "  codesign will show a password dialog on each build — that is OK."
+        echo "  Permissions will still be stable as long as you click 'Always Allow'."
+    fi
+fi
 
+echo ""
 echo "✓ Identity created."
 echo ""
 echo "Available code-signing identities:"
 security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "\"$IDENTITY_NAME\"" || true
 echo ""
 echo "You can now build the app with ./Scripts/build-app.sh."
-echo "Permissions should now persist across rebuilds."
+echo "Permissions will persist across rebuilds."
