@@ -7,51 +7,66 @@ struct RootView: View {
     @State private var showingSearch = false
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280)
-        } detail: {
-            DetailRouter()
-        }
-        .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search …")
-        .onSubmit(of: .search) { showingSearch = !searchQuery.isEmpty }
-        .sheet(isPresented: $showingSearch) {
-            SearchSheet(query: searchQuery, isPresented: $showingSearch)
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    library.openImportDialog()
-                } label: {
-                    Label("Add Recording", systemImage: "plus")
-                }
-                .disabled(library.importInProgress || library.isRecording)
+        VStack(spacing: 0) {
+            NavigationSplitView {
+                SidebarView()
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+            } detail: {
+                DetailRouter()
             }
-            ToolbarItem(placement: .navigation) {
-                RecordToolbarControl()
+            .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search …")
+            .onSubmit(of: .search) { showingSearch = !searchQuery.isEmpty }
+            .sheet(isPresented: $showingSearch) {
+                SearchSheet(query: searchQuery, isPresented: $showingSearch)
             }
-            ToolbarItem(placement: .status) {
-                HStack(spacing: 6) {
-                    if library.importInProgress {
-                        ProgressView().controlSize(.small)
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        library.openImportDialog()
+                    } label: {
+                        Label("Add Recording", systemImage: "plus")
                     }
-                    Text(library.statusMessage.isEmpty ? " " : library.statusMessage)
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .frame(minWidth: 200, alignment: .leading)
+                    .disabled(library.importInProgress || library.isRecording)
+                }
+                ToolbarItem(placement: .navigation) {
+                    RecordToolbarControl()
                 }
             }
+            .onChange(of: searchQuery) { _, new in
+                if new.isEmpty { showingSearch = false }
+            }
+            .alert(item: $library.errorAlert) { err in
+                Alert(
+                    title: Text(err.title),
+                    message: Text(err.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+
+            StatusBar()
         }
-        .onChange(of: searchQuery) { _, new in
-            if new.isEmpty { showingSearch = false }
+    }
+}
+
+struct StatusBar: View {
+    @EnvironmentObject var library: LibraryViewModel
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if library.importInProgress {
+                ProgressView().controlSize(.small)
+            }
+            Text(library.statusMessage.isEmpty ? " " : library.statusMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
         }
-        .alert(item: $library.errorAlert) { err in
-            Alert(
-                title: Text(err.title),
-                message: Text(err.message),
-                dismissButton: .default(Text("OK"))
-            )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(.bar)
+        .overlay(alignment: .top) {
+            Divider()
         }
     }
 }
