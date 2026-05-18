@@ -12,7 +12,7 @@ public struct AppConfig: Sendable {
     }
 
     public static let defaultArchiveSubpath = "Library/Application Support/diarize/archive"
-    public static let defaultSimilarityThreshold: Float = 0.6
+    public static let defaultSimilarityThreshold: Float = 0.5
 
     public init(
         archivePath: URL,
@@ -58,6 +58,13 @@ public enum AppConfigLoader {
 
         let threshold: Float = {
             if let raw = env["DIARIZE_SIMILARITY_THRESHOLD"], let value = Float(raw) {
+                return value
+            }
+            let configFile = home.appendingPathComponent(".config/diarize/config.json")
+            if let data = try? Data(contentsOf: configFile),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let raw = json["similarity.threshold"] as? String,
+               let value = Float(raw) {
                 return value
             }
             return AppConfig.defaultSimilarityThreshold

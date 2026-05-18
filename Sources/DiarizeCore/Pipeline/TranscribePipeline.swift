@@ -182,11 +182,34 @@ public final class TranscribePipeline {
             var matchedIds: [String] = []
             var pendingEmbeddingIds: [Int64] = []
 
+            // Group per-segment embeddings by local speaker id for bulk storage below.
+            var segmentEmbeddingsByLocal: [String: [(embedding: [Float], start: Double, end: Double)]] = [:]
+            for seg in diarization.segments where !seg.embedding.isEmpty {
+                segmentEmbeddingsByLocal[seg.localSpeakerId, default: []].append(
+                    (seg.embedding, seg.startSec, seg.endSec)
+                )
+            }
+
             for (localId, centroid) in diarization.speakerCentroids {
                 let result = try matcher.matchOrCreate(centroid: centroid, recordingId: nil, segmentRange: nil)
                 localToGlobal[localId] = result.speakerId
                 pendingEmbeddingIds.append(result.embeddingId)
                 if result.isNew { newIds.append(result.speakerId) } else { matchedIds.append(result.speakerId) }
+
+                // Store individual segment embeddings so future recordings have more
+                // data points for k-NN voting — a single centroid is too fragile.
+                if let segs = segmentEmbeddingsByLocal[localId] {
+                    for s in segs {
+                        let embId = try store.insertEmbedding(SpeakerEmbedding(
+                            speakerId: result.speakerId,
+                            vector: s.embedding,
+                            recordingId: stub.id,
+                            segmentStart: s.start,
+                            segmentEnd: s.end
+                        ))
+                        pendingEmbeddingIds.append(embId)
+                    }
+                }
             }
 
             progress.step("Loading ASR models …")
