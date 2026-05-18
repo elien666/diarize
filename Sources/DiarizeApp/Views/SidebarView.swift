@@ -11,6 +11,13 @@ struct SidebarView: View {
                     NavigationLink(value: SidebarItem.recording(rec.id)) {
                         RecordingRow(recording: rec)
                     }
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            library.deleteRecording(rec.id)
+                        } label: {
+                            Label("Delete Recording", systemImage: "trash")
+                        }
+                    }
                 }
             } header: {
                 Label("Recordings", systemImage: "waveform")

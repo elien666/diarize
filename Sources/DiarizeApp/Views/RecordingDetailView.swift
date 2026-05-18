@@ -70,6 +70,12 @@ struct RecordingDetailView: View {
                         NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
                     }
                     .controlSize(.small)
+                    Button(role: .destructive) {
+                        library.deleteRecording(recording.id)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    .controlSize(.small)
                 }
             }
             .font(.caption)
