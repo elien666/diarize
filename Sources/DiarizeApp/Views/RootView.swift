@@ -62,8 +62,8 @@ struct StatusBar: View {
                 .lineLimit(1)
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
         .background(.bar)
         .overlay(alignment: .top) {
             Divider()
