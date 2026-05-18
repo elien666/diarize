@@ -5,26 +5,26 @@ import Foundation
 struct ConfigCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "config",
-        abstract: "Zeigt oder ändert die Konfiguration.",
+        abstract: "Show or change the configuration.",
         subcommands: [Show.self, Set.self]
     )
 
     struct Show: ParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "show", abstract: "Zeigt die aktuelle Konfiguration.")
+        static let configuration = CommandConfiguration(commandName: "show", abstract: "Show the current configuration.")
         func run() throws {
             let config = AppConfigLoader.load()
             print("archive.path:           \(config.archivePath.path)")
             print("default.language:       \(config.defaultLanguage.rawValue)")
             print("similarity.threshold:   \(config.similarityThreshold)")
             print("")
-            print("Quellen (Override-Reihenfolge): CLI-Flag > Env-Var > ~/.config/diarize/config.json > Default")
+            print("Sources (override order): CLI flag > env var > ~/.config/diarize/config.json > default")
             print("Env-Vars: DIARIZE_ARCHIVE_PATH, DIARIZE_LANG_DEFAULT, DIARIZE_SIMILARITY_THRESHOLD")
         }
     }
 
     struct Set: ParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "set", abstract: "Setzt einen Wert in ~/.config/diarize/config.json.")
-        @Argument(help: "Schlüssel (aktuell unterstützt: archive.path, default.language, similarity.threshold).") var key: String
+        static let configuration = CommandConfiguration(commandName: "set", abstract: "Set a value in ~/.config/diarize/config.json.")
+        @Argument(help: "Key (currently supported: archive.path, default.language, similarity.threshold).") var key: String
         @Argument var value: String
 
         func run() throws {
@@ -45,14 +45,14 @@ struct ConfigCommand: ParsableCommand {
                 json["archive"] = archive
             case "default.language":
                 guard AppConfig.Language(rawValue: value) != nil else {
-                    throw ValidationError("Ungültige Sprache. Erlaubt: de, en, auto.")
+                    throw ValidationError("Invalid language. Allowed: de, en, auto.")
                 }
                 json["default.language"] = value
             case "similarity.threshold":
-                guard let _ = Float(value) else { throw ValidationError("Wert muss eine Zahl sein.") }
+                guard let _ = Float(value) else { throw ValidationError("Value must be a number.") }
                 json["similarity.threshold"] = value
             default:
-                throw ValidationError("Unbekannter Schlüssel '\(key)'.")
+                throw ValidationError("Unknown key '\(key)'.")
             }
 
             let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])

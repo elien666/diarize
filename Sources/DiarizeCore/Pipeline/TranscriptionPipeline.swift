@@ -70,7 +70,7 @@ public final class TranscriptionPipeline {
                 || now.timeIntervalSince(lastReported) >= 2.0
             if shouldReport {
                 let pct = Int((Double(idx + 1) / Double(total)) * 100)
-                progress?.step("Transkribiere [\(idx + 1)/\(total)] \(pct)%")
+                progress?.step("Transcribing [\(idx + 1)/\(total)] \(pct)%")
                 lastReported = now
             }
         }

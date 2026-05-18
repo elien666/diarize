@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds Diarize.app — a proper macOS app bundle so macOS can persist mic /
 # screen-recording permissions and so the app shows up in
-# Systemeinstellungen → Datenschutz & Sicherheit.
+# System Settings → Privacy & Security.
 #
 # Usage:
 #   ./Scripts/build-app.sh                # builds to ./build/Diarize.app
@@ -60,23 +60,23 @@ cat > "$CONTENTS/Info.plist" <<EOF
     <key>CFBundleIconFile</key><string>Diarize</string>
     <key>CFBundleIconName</key><string>Diarize</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Diarize nimmt dein Mikrofon für Meeting-Aufnahmen auf, die lokal transkribiert und archiviert werden.</string>
+    <string>Diarize records your microphone for meeting recordings that are transcribed and archived locally.</string>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Diarize nimmt System-Audio (z.B. aus Online-Meetings) zur lokalen Transkription auf. Bildschirminhalte werden nicht gespeichert.</string>
+    <string>Diarize records system audio (e.g. from online meetings) for local transcription. Screen contents are not saved.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Diarize benötigt keine AppleScript-Interaktion.</string>
+    <string>Diarize does not require AppleScript interaction.</string>
 </dict>
 </plist>
 EOF
 
 SIGN_IDENTITY="Diarize Local Dev"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$SIGN_IDENTITY\""; then
-    echo "→ Code signing mit '$SIGN_IDENTITY' (stabile Identity → Permissions bleiben über Rebuilds)"
+    echo "→ Code signing with '$SIGN_IDENTITY' (stable identity → permissions persist across rebuilds)"
     codesign --force --sign "$SIGN_IDENTITY" --deep --timestamp=none "$APP_DIR"
 else
-    echo "⚠ Keine stabile Identity '$SIGN_IDENTITY' im Keychain gefunden — fallback auf ad-hoc."
-    echo "   macOS-Permissions werden bei jedem Rebuild zurückgesetzt."
-    echo "   Tipp: ./Scripts/setup-signing-identity.sh ausführen für stabile Permissions."
+    echo "⚠ No stable identity '$SIGN_IDENTITY' found in keychain — falling back to ad-hoc."
+    echo "   macOS permissions will reset on every rebuild."
+    echo "   Tip: run ./Scripts/setup-signing-identity.sh for stable permissions."
     codesign --force --sign - --deep --timestamp=none "$APP_DIR"
 fi
 
@@ -90,6 +90,6 @@ if [[ "${1:-}" == "--install" ]]; then
     echo "✓ Installed. Start with: open '$DEST'"
 else
     echo ""
-    echo "Start mit:  open '$APP_DIR'"
-    echo "Installieren: $0 --install"
+    echo "Start with:  open '$APP_DIR'"
+    echo "Install:     $0 --install"
 fi

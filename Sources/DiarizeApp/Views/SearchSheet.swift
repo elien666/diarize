@@ -10,16 +10,16 @@ struct SearchSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("Suche: \(query)", systemImage: "magnifyingglass")
+                Label("Search: \(query)", systemImage: "magnifyingglass")
                     .font(.headline)
                 Spacer()
-                Button("Schließen") { isPresented = false }
+                Button("Close") { isPresented = false }
                     .keyboardShortcut(.escape, modifiers: [])
             }
             .padding()
             Divider()
             if hits.isEmpty {
-                Text("Keine Treffer für '\(query)'.")
+                Text("No results for '\(query)'.")
                     .foregroundStyle(.secondary)
                     .padding()
             } else {

@@ -47,12 +47,12 @@ public final class TranscribePipeline {
         try config.ensureDirectories()
         let lang = language ?? config.defaultLanguage
 
-        progress.step("Berechne Source-Hash …")
+        progress.step("Computing source hash …")
         let hash = try AudioHasher.sha256(of: audioPath)
         progress.step("Hash: \(String(hash.prefix(12))) …")
 
         if duplicatePolicy == .skip, let existing = try store.recording(sourceHash: hash) {
-            progress.step("Bereits transkribiert (\(existing.id)) — überspringe.")
+            progress.step("Already transcribed (\(existing.id)) — skipping.")
             let segs = try store.segments(for: existing.id)
             return TranscribeOutput(
                 recording: existing,
@@ -109,7 +109,7 @@ public final class TranscribePipeline {
         try store.setProcessingState(recordingId: recordingId, state: .analyzing)
 
         // Recompute hash for the now-finished file (live recording grows during capture).
-        progress.step("Berechne Source-Hash …")
+        progress.step("Computing source hash …")
         if let hash = try? AudioHasher.sha256(of: audioPath) {
             try store.setSourceHash(recordingId: recordingId, hash: hash)
         }
@@ -139,17 +139,17 @@ public final class TranscribePipeline {
         title: String?
     ) async throws -> TranscribeOutput {
         do {
-            progress.step("Lade Audio …")
+            progress.step("Loading audio …")
             let audio = try AudioLoader.load(url: audioPath)
             try store.updateRecordingDuration(id: stub.id, durationSec: audio.durationSec)
 
-            progress.step("Lade Diarization-Modelle …")
+            progress.step("Loading diarization models …")
             let diarizer = DiarizationPipeline()
             try await diarizer.prepareModels()
 
-            progress.step("Diarisierung läuft …")
+            progress.step("Running diarization …")
             let diarization = try await diarizer.diarize(samples: audio.samples)
-            progress.step("Diarisiert: \(diarization.segments.count) Segmente, \(diarization.speakerCentroids.count) lokale Sprecher")
+            progress.step("Diarized: \(diarization.segments.count) segments, \(diarization.speakerCentroids.count) local speakers")
 
             // No speech → mark empty and write an empty transcript.
             guard !diarization.segments.isEmpty else {
@@ -175,7 +175,7 @@ public final class TranscribePipeline {
                 )
             }
 
-            progress.step("Sprecher-Matching …")
+            progress.step("Speaker matching …")
             let matcher = try SpeakerMatcher(store: store, threshold: config.similarityThreshold)
             var localToGlobal: [String: String] = [:]
             var newIds: [String] = []
@@ -189,12 +189,12 @@ public final class TranscribePipeline {
                 if result.isNew { newIds.append(result.speakerId) } else { matchedIds.append(result.speakerId) }
             }
 
-            progress.step("Lade ASR-Modelle …")
+            progress.step("Loading ASR models …")
             let asr = TranscriptionPipeline(progress: progress)
             let modelVersion: AsrModelVersion = (lang == .en) ? .v2 : .v3
             try await asr.loadModels(version: modelVersion)
 
-            progress.step("Transkribiere \(diarization.segments.count) Segmente …")
+            progress.step("Transcribing \(diarization.segments.count) segments …")
             let asrLang: Language? = (modelVersion == .v3) ? TranscriptionPipeline.language(for: lang) : nil
             let transcribed = try await asr.transcribe(
                 diarized: diarization.segments,
@@ -223,7 +223,7 @@ public final class TranscribePipeline {
 
             let final = try store.recording(id: stub.id) ?? stub
 
-            progress.step("Persistiere & rendere Transkripte …")
+            progress.step("Persisting & rendering transcripts …")
             try writeTranscripts(
                 recording: final,
                 segments: segments,
@@ -298,7 +298,7 @@ public final class TranscribePipeline {
         case recordingNotFound(String)
         public var errorDescription: String? {
             switch self {
-            case .recordingNotFound(let id): return "Aufnahme '\(id)' nicht gefunden."
+            case .recordingNotFound(let id): return "Recording '\(id)' not found."
             }
         }
     }
@@ -314,7 +314,7 @@ public final class TranscribePipeline {
         createdAt: Date
     ) throws {
         let labels = try currentLabels()
-        let labelFn: (String) -> String = { id in labels[id] ?? "Unbekannt-\(String(id.suffix(6)))" }
+        let labelFn: (String) -> String = { id in labels[id] ?? "Unknown-\(String(id.suffix(6)))" }
 
         let md = MarkdownRenderer.render(
             title: title,
@@ -342,10 +342,10 @@ public final class TranscribePipeline {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd-HHmmss"
         let ts = f.string(from: date)
-        let slug = (title ?? "aufnahme")
+        let slug = (title ?? "recording")
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
             .filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        return "\(ts)-\(slug.isEmpty ? "aufnahme" : slug)"
+        return "\(ts)-\(slug.isEmpty ? "recording" : slug)"
     }
 }

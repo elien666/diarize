@@ -23,9 +23,9 @@ struct DiarizeAppMain: App {
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Aufnahme öffnen …") { library.openImportDialog() }
+                Button("Open Recording …") { library.openImportDialog() }
                     .keyboardShortcut("o")
-                Button("Bibliothek neu laden") { library.reload() }
+                Button("Reload Library") { library.reload() }
                     .keyboardShortcut("r")
             }
         }

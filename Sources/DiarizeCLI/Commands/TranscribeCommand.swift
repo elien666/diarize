@@ -5,22 +5,22 @@ import Foundation
 struct TranscribeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "transcribe",
-        abstract: "Diarisiere und transkribiere eine Audiodatei (mp3, wav, m4a, …)."
+        abstract: "Diarize and transcribe an audio file (mp3, wav, m4a, …)."
     )
 
-    @Argument(help: "Pfad zur Audiodatei.")
+    @Argument(help: "Path to the audio file.")
     var audio: String
 
-    @Option(name: .long, help: "Sprache: de, en oder auto (Default aus Config).")
+    @Option(name: .long, help: "Language: de, en, or auto (default from config).")
     var lang: String?
 
-    @Option(name: .long, help: "Optionaler Titel für das Transkript.")
+    @Option(name: .long, help: "Optional title for the transcript.")
     var title: String?
 
-    @Option(name: .long, help: "Override Archiv-Pfad.")
+    @Option(name: .long, help: "Override archive path.")
     var archive: String?
 
-    @Flag(name: .long, help: "Audiodatei erneut verarbeiten, auch wenn der Source-Hash bereits archiviert ist.")
+    @Flag(name: .long, help: "Re-process the audio file even if the source hash is already archived.")
     var force: Bool = false
 
     func run() async throws {
@@ -31,7 +31,7 @@ struct TranscribeCommand: AsyncParsableCommand {
         let language: AppConfig.Language?
         if let lang {
             guard let parsed = AppConfig.Language(rawValue: lang) else {
-                throw ValidationError("Unbekannte Sprache '\(lang)'. Erlaubt: de, en, auto.")
+                throw ValidationError("Unknown language '\(lang)'. Allowed: de, en, auto.")
             }
             language = parsed
         } else {
@@ -49,19 +49,19 @@ struct TranscribeCommand: AsyncParsableCommand {
         )
 
         if result.skipped {
-            print("↺ Übersprungen — Aufnahme \(result.recording.id) existiert bereits.")
+            print("↺ Skipped — recording \(result.recording.id) already exists.")
             print("  Markdown: \(result.markdownPath.path)")
-            print("  Tipp: 'diarize transcribe … --force' überschreibt; 'diarize archive reprocess <id>' rendert nur neu.")
+            print("  Tip: 'diarize transcribe … --force' overwrites; 'diarize archive reprocess <id>' re-renders only.")
             return
         }
 
-        print("✓ Aufnahme: \(result.recording.id)")
+        print("✓ Recording: \(result.recording.id)")
         print("  Markdown: \(result.markdownPath.path)")
         print("  JSON:     \(result.jsonPath.path)")
-        print("  Sprecher: \(result.matchedSpeakerIds.count) wiedererkannt, \(result.newSpeakerIds.count) neu")
+        print("  Speakers: \(result.matchedSpeakerIds.count) matched, \(result.newSpeakerIds.count) new")
         if !result.newSpeakerIds.isEmpty {
-            print("  Neue IDs: \(result.newSpeakerIds.joined(separator: ", "))")
-            print("  Tipp: 'diarize speakers label <id> <name>' um Sprecher zu benennen.")
+            print("  New IDs: \(result.newSpeakerIds.joined(separator: ", "))")
+            print("  Tip: 'diarize speakers label <id> <name>' to name speakers.")
         }
     }
 }

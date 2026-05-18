@@ -5,23 +5,23 @@ import Foundation
 struct ArchiveCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "archive",
-        abstract: "Verwaltet das Aufnahme-Archiv.",
+        abstract: "Manage the recording archive.",
         subcommands: [List.self, Show.self, Reprocess.self, ReprocessAll.self, Backfill.self, Dedupe.self, Delete.self]
     )
 
     struct List: ParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "list", abstract: "Listet alle archivierten Aufnahmen.")
+        static let configuration = CommandConfiguration(commandName: "list", abstract: "List all archived recordings.")
         func run() throws {
             let config = AppConfigLoader.load()
             try config.ensureDirectories()
             let store = try SpeakerStore(path: config.databasePath)
             let recs = try store.allRecordings()
             if recs.isEmpty {
-                print("Keine Aufnahmen im Archiv.")
+                print("No recordings in the archive.")
                 return
             }
             let widths = [40, 20, 6, 9, 0]
-            print(TableRow.format(["ID", "Erstellt", "Lang", "Dauer", "Titel"], widths: widths))
+            print(TableRow.format(["ID", "Created", "Lang", "Duration", "Title"], widths: widths))
             let f = ISO8601DateFormatter()
             for r in recs {
                 print(TableRow.format([
@@ -36,21 +36,21 @@ struct ArchiveCommand: AsyncParsableCommand {
     }
 
     struct Show: ParsableCommand {
-        static let configuration = CommandConfiguration(commandName: "show", abstract: "Zeigt Pfade & Eckdaten einer Aufnahme.")
+        static let configuration = CommandConfiguration(commandName: "show", abstract: "Show paths & key data of a recording.")
         @Argument var recordingId: String
         func run() throws {
             let config = AppConfigLoader.load()
             try config.ensureDirectories()
             let store = try SpeakerStore(path: config.databasePath)
             guard let r = try store.recording(id: recordingId) else {
-                throw ValidationError("Aufnahme '\(recordingId)' nicht gefunden.")
+                throw ValidationError("Recording '\(recordingId)' not found.")
             }
             print("ID:        \(r.id)")
-            print("Titel:     \(r.title ?? "—")")
-            print("Quelle:    \(r.sourcePath)")
-            print("Erstellt:  \(r.createdAt)")
-            print("Sprache:   \(r.language)")
-            print("Dauer:     \(MarkdownTimeFormatter.duration(r.durationSec))")
+            print("Title:     \(r.title ?? "—")")
+            print("Source:    \(r.sourcePath)")
+            print("Created:   \(r.createdAt)")
+            print("Language:  \(r.language)")
+            print("Duration:  \(MarkdownTimeFormatter.duration(r.durationSec))")
             print("Markdown:  \(r.transcriptMd)")
             print("JSON:      \(r.transcriptJson)")
         }
@@ -59,7 +59,7 @@ struct ArchiveCommand: AsyncParsableCommand {
     struct Reprocess: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "reprocess",
-            abstract: "Rendert Markdown + JSON einer Aufnahme neu mit den aktuellen Sprecher-Labels (kein Modell-Lauf)."
+            abstract: "Re-render Markdown + JSON of a recording with current speaker labels (no model run)."
         )
         @Argument var recordingId: String
 
@@ -69,7 +69,7 @@ struct ArchiveCommand: AsyncParsableCommand {
             let store = try SpeakerStore(path: config.databasePath)
             let pipeline = TranscribePipeline(config: config, store: store)
             let result = try pipeline.rerender(recordingId: recordingId)
-            print("✓ \(result.recording.id) neu gerendert.")
+            print("✓ \(result.recording.id) re-rendered.")
             print("  Markdown: \(result.markdownPath.path)")
             print("  JSON:     \(result.jsonPath.path)")
         }
@@ -78,7 +78,7 @@ struct ArchiveCommand: AsyncParsableCommand {
     struct ReprocessAll: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "reprocess-all",
-            abstract: "Rendert ALLE archivierten Aufnahmen neu mit aktuellen Sprecher-Labels."
+            abstract: "Re-render ALL archived recordings with current speaker labels."
         )
 
         func run() throws {
@@ -87,19 +87,19 @@ struct ArchiveCommand: AsyncParsableCommand {
             let store = try SpeakerStore(path: config.databasePath)
             let pipeline = TranscribePipeline(config: config, store: store)
             let recs = try store.allRecordings()
-            print("Rendere \(recs.count) Aufnahmen neu …")
+            print("Re-rendering \(recs.count) recordings …")
             for r in recs {
                 _ = try pipeline.rerender(recordingId: r.id)
                 print("  ✓ \(r.id)  \(r.title ?? "—")")
             }
-            print("Fertig.")
+            print("Done.")
         }
     }
 
     struct Backfill: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "backfill-hashes",
-            abstract: "Berechnet sourceHash für alle Aufnahmen, denen er fehlt (nach Migration / altem Bug)."
+            abstract: "Compute sourceHash for all recordings that are missing it (after migration / old bug)."
         )
 
         func run() throws {
@@ -110,7 +110,7 @@ struct ArchiveCommand: AsyncParsableCommand {
             for r in try store.allRecordings() where r.sourceHash == nil {
                 let url = URL(fileURLWithPath: r.sourcePath)
                 guard FileManager.default.fileExists(atPath: url.path) else {
-                    print("⚠ Quelle fehlt für \(r.id): \(r.sourcePath)")
+                    print("⚠ Source missing for \(r.id): \(r.sourcePath)")
                     missing += 1
                     continue
                 }
@@ -119,16 +119,16 @@ struct ArchiveCommand: AsyncParsableCommand {
                 print("✓ \(r.id) → \(String(hash.prefix(12)))…")
                 fixed += 1
             }
-            print("Fertig. \(fixed) Hashes nachgetragen, \(missing) Quellen fehlten.")
+            print("Done. \(fixed) hashes backfilled, \(missing) sources missing.")
         }
     }
 
     struct Dedupe: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "dedupe",
-            abstract: "Findet doppelte Aufnahmen (gleicher sourceHash) und löscht alle bis auf die jüngste pro Hash."
+            abstract: "Find duplicate recordings (same sourceHash) and delete all but the most recent per hash."
         )
-        @Flag(name: .long, help: "Nur anzeigen, nichts löschen.")
+        @Flag(name: .long, help: "Show only, delete nothing.")
         var dryRun: Bool = false
 
         func run() throws {
@@ -137,13 +137,13 @@ struct ArchiveCommand: AsyncParsableCommand {
             let store = try SpeakerStore(path: config.databasePath)
             let groups = try store.duplicateRecordings()
             if groups.isEmpty {
-                print("Keine Duplikate gefunden.")
+                print("No duplicates found.")
                 return
             }
             for (hash, recs) in groups {
                 let keep = recs.first!
                 let drop = Array(recs.dropFirst())
-                print("Hash \(String(hash.prefix(12)))…  behalte \(keep.id) (\(keep.createdAt))")
+                print("Hash \(String(hash.prefix(12)))…  keeping \(keep.id) (\(keep.createdAt))")
                 for d in drop {
                     print("  ✗ \(d.id) (\(d.createdAt))")
                     if !dryRun {
@@ -151,14 +151,14 @@ struct ArchiveCommand: AsyncParsableCommand {
                     }
                 }
             }
-            if dryRun { print("(dry-run — nichts gelöscht. Erneut ohne --dry-run ausführen.)") }
+            if dryRun { print("(dry-run — nothing deleted. Run again without --dry-run.)") }
         }
     }
 
     struct Delete: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "delete",
-            abstract: "Löscht eine Aufnahme aus dem Archiv (Quell-Datei bleibt unangetastet)."
+            abstract: "Delete a recording from the archive (source file is left untouched)."
         )
         @Argument var recordingId: String
 
@@ -167,10 +167,10 @@ struct ArchiveCommand: AsyncParsableCommand {
             try config.ensureDirectories()
             let store = try SpeakerStore(path: config.databasePath)
             guard try store.recording(id: recordingId) != nil else {
-                throw ValidationError("Aufnahme '\(recordingId)' nicht gefunden.")
+                throw ValidationError("Recording '\(recordingId)' not found.")
             }
             try store.deleteRecording(id: recordingId)
-            print("✓ \(recordingId) gelöscht.")
+            print("✓ \(recordingId) deleted.")
         }
     }
 }

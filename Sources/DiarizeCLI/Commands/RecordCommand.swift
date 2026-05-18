@@ -5,25 +5,25 @@ import Foundation
 struct RecordCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "record",
-        abstract: "Nimmt Mikrofon und/oder System-Audio auf, transkribiert nach Stop automatisch."
+        abstract: "Records microphone and/or system audio, transcribes automatically after stop."
     )
 
-    @Flag(name: .long, help: "Nur Mikrofon aufnehmen.")
+    @Flag(name: .long, help: "Record microphone only.")
     var micOnly: Bool = false
 
-    @Flag(name: .long, help: "Nur System-Audio aufnehmen (z.B. Online-Meetings).")
+    @Flag(name: .long, help: "Record system audio only (e.g. online meetings).")
     var systemOnly: Bool = false
 
-    @Option(name: .long, help: "Pfad für die WAV-Aufnahme. Default: <archive>/recordings/<timestamp>.wav")
+    @Option(name: .long, help: "Path for the WAV recording. Default: <archive>/recordings/<timestamp>.wav")
     var output: String?
 
-    @Option(name: .long, help: "Optionaler Titel für das spätere Transkript.")
+    @Option(name: .long, help: "Optional title for the later transcript.")
     var title: String?
 
-    @Option(name: .long, help: "Sprache: de, en, auto (Default aus Config).")
+    @Option(name: .long, help: "Language: de, en, auto (default from config).")
     var lang: String?
 
-    @Flag(name: .long, help: "Nicht automatisch transkribieren — nur die WAV-Datei behalten.")
+    @Flag(name: .long, help: "Do not transcribe automatically — keep the WAV file only.")
     var noTranscribe: Bool = false
 
     func run() async throws {
@@ -51,7 +51,7 @@ struct RecordCommand: AsyncParsableCommand {
         let language: AppConfig.Language?
         if let lang {
             guard let parsed = AppConfig.Language(rawValue: lang) else {
-                throw ValidationError("Unbekannte Sprache '\(lang)'. Erlaubt: de, en, auto.")
+                throw ValidationError("Unknown language '\(lang)'. Allowed: de, en, auto.")
             }
             language = parsed
         } else {
@@ -61,8 +61,8 @@ struct RecordCommand: AsyncParsableCommand {
         let recorder = try AudioRecorder(config: AudioRecorder.Config(sources: sources, outputURL: outputURL))
 
         let sourceLabel = sources.map { $0.rawValue }.sorted().joined(separator: "+")
-        FileHandle.standardError.write(Data("[diarize] Starte Aufnahme: \(sourceLabel) → \(outputURL.path)\n".utf8))
-        FileHandle.standardError.write(Data("[diarize] Stop mit Ctrl-C. Datei wird sauber geschlossen und (sofern nicht --no-transcribe) sofort transkribiert.\n".utf8))
+        FileHandle.standardError.write(Data("[diarize] Starting recording: \(sourceLabel) → \(outputURL.path)\n".utf8))
+        FileHandle.standardError.write(Data("[diarize] Stop with Ctrl-C. File will be closed cleanly and (unless --no-transcribe) transcribed immediately.\n".utf8))
 
         try await recorder.start()
         let started = Date()
@@ -71,16 +71,16 @@ struct RecordCommand: AsyncParsableCommand {
         await waitForShutdown()
 
         let duration = Date().timeIntervalSince(started)
-        FileHandle.standardError.write(Data(String(format: "[diarize] Stoppe Aufnahme nach %.1fs …\n", duration).utf8))
+        FileHandle.standardError.write(Data(String(format: "[diarize] Stopping recording after %.1fs …\n", duration).utf8))
         try await recorder.stop()
 
         if noTranscribe {
-            print("✓ Aufnahme gespeichert: \(outputURL.path)")
-            print("  Transkribieren später mit: diarize transcribe \"\(outputURL.path)\"")
+            print("✓ Recording saved: \(outputURL.path)")
+            print("  Transcribe later with: diarize transcribe \"\(outputURL.path)\"")
             return
         }
 
-        FileHandle.standardError.write(Data("[diarize] Starte Transkription …\n".utf8))
+        FileHandle.standardError.write(Data("[diarize] Starting transcription …\n".utf8))
         let store = try SpeakerStore(path: config.databasePath)
         let pipeline = TranscribePipeline(config: config, store: store)
         let result = try await pipeline.run(
@@ -89,9 +89,9 @@ struct RecordCommand: AsyncParsableCommand {
             language: language,
             duplicatePolicy: .force
         )
-        print("✓ Aufnahme: \(result.recording.id)")
+        print("✓ Recording: \(result.recording.id)")
         print("  Markdown: \(result.markdownPath.path)")
-        print("  Sprecher: \(result.matchedSpeakerIds.count) wiedererkannt, \(result.newSpeakerIds.count) neu")
+        print("  Speakers: \(result.matchedSpeakerIds.count) matched, \(result.newSpeakerIds.count) new")
     }
 
     /// Suspends until the process receives SIGINT or SIGTERM.

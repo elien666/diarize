@@ -13,7 +13,7 @@ struct SidebarView: View {
                     }
                 }
             } header: {
-                Label("Aufnahmen", systemImage: "waveform")
+                Label("Recordings", systemImage: "waveform")
             }
 
             Section {
@@ -23,7 +23,7 @@ struct SidebarView: View {
                     }
                 }
             } header: {
-                Label("Sprecher", systemImage: "person.2")
+                Label("Speakers", systemImage: "person.2")
             }
         }
         .listStyle(.sidebar)
@@ -66,7 +66,7 @@ struct RecordingRow: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 stateIndicator
-                Text(recording.title ?? "Aufnahme")
+                Text(recording.title ?? "Recording")
                     .font(.body)
                     .lineLimit(1)
             }
@@ -119,9 +119,9 @@ struct SpeakerRow: View {
                 .fill(SpeakerColors.color(for: speaker.id))
                 .frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 1) {
-                Text(speaker.label ?? "Unbekannt-\(String(speaker.id.suffix(6)))")
+                Text(speaker.label ?? "Unknown-\(String(speaker.id.suffix(6)))")
                     .lineLimit(1)
-                Text("\(library.segmentCount(speakerId: speaker.id)) Segmente")
+                Text("\(library.segmentCount(speakerId: speaker.id)) segments")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -129,7 +129,7 @@ struct SpeakerRow: View {
             if speaker.label == nil {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.yellow)
-                    .help("Unbenannt — labeln")
+                    .help("Unnamed — add a label")
             }
         }
     }

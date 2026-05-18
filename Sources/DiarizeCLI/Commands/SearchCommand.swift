@@ -5,21 +5,21 @@ import Foundation
 struct SearchCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "search",
-        abstract: "Volltextsuche über alle Transkripte (FTS5)."
+        abstract: "Full-text search across all transcripts (FTS5)."
     )
 
-    @Argument(parsing: .remaining, help: "Suchbegriff(e). Mehrere Wörter werden als AND verknüpft. Anführungszeichen erlauben FTS5-Syntax (NEAR, OR, AND).")
+    @Argument(parsing: .remaining, help: "Search term(s). Multiple words are AND-linked. Quotes allow FTS5 syntax (NEAR, OR, AND).")
     var query: [String]
 
-    @Option(name: .long, help: "Maximale Treffer (Default 30).")
+    @Option(name: .long, help: "Maximum results (default 30).")
     var limit: Int = 30
 
-    @Flag(name: .long, help: "Maschinen-lesbares JSON-Output statt formatierter Liste.")
+    @Flag(name: .long, help: "Machine-readable JSON output instead of formatted list.")
     var json: Bool = false
 
     func run() throws {
         let q = query.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { throw ValidationError("Bitte einen Suchbegriff angeben.") }
+        guard !q.isEmpty else { throw ValidationError("Please provide a search term.") }
 
         let config = AppConfigLoader.load()
         try config.ensureDirectories()
@@ -45,10 +45,10 @@ struct SearchCommand: ParsableCommand {
         }
 
         if hits.isEmpty {
-            print("Keine Treffer für '\(q)'.")
+            print("No results for '\(q)'.")
             return
         }
-        print("\(hits.count) Treffer für '\(q)':\n")
+        print("\(hits.count) results for '\(q)':\n")
         for hit in hits {
             let speaker = hit.speakerLabel ?? "—"
             let title = hit.recordingTitle ?? hit.recordingId

@@ -50,7 +50,7 @@ struct RecordingDetailView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Text(recording.title ?? "Aufnahme")
+                Text(recording.title ?? "Recording")
                     .font(.title2.weight(.semibold))
                 StateBadge(state: recording.processingState)
             }
@@ -62,11 +62,11 @@ struct RecordingDetailView: View {
                     Text("·")
                     Text(recording.language.uppercased())
                     Text("·")
-                    Text("\(uniqueSpeakers().count) Sprecher")
+                    Text("\(uniqueSpeakers().count) speakers")
                 }
                 Spacer()
                 if recording.processingState == .done {
-                    Button("Markdown öffnen") {
+                    Button("Open Markdown") {
                         NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
                     }
                     .controlSize(.small)
@@ -109,12 +109,12 @@ struct RecordingDetailView: View {
             Button(role: .destructive) {
                 library.cancelRecording()
             } label: {
-                Label("Verwerfen", systemImage: "trash")
+                Label("Discard", systemImage: "trash")
             }
             Button {
                 library.stopRecordingAndTranscribe()
             } label: {
-                Label("Stop & Analysieren", systemImage: "stop.circle.fill")
+                Label("Stop & Analyze", systemImage: "stop.circle.fill")
                     .foregroundStyle(.red)
             }
             .keyboardShortcut("s", modifiers: .command)
@@ -176,9 +176,9 @@ struct RecordingDetailView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(.red)
                 .symbolEffect(.variableColor.iterative, isActive: true)
-            Text("Aufnahme läuft")
+            Text("Recording in progress")
                 .font(.headline)
-            Text("Beende die Aufnahme oben mit Stop & Analysieren.\nDanach werden Diarisierung und Transkription ausgeführt.")
+            Text("Stop the recording above with Stop & Analyze.\nDiarization and transcription will run afterwards.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
         }
@@ -190,9 +190,9 @@ struct RecordingDetailView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .controlSize(.large)
-            Text("Analyse läuft …")
+            Text("Analysis in progress …")
                 .font(.headline)
-            Text(library.statusMessage.isEmpty ? "Diarisierung und Transkription dauern bei einer Stunde Audio etwa eine Minute." : library.statusMessage)
+            Text(library.statusMessage.isEmpty ? "Diarization and transcription take about one minute per hour of audio." : library.statusMessage)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 480)
@@ -206,9 +206,9 @@ struct RecordingDetailView: View {
             Image(systemName: "text.bubble")
                 .font(.system(size: 48))
                 .foregroundStyle(.tertiary)
-            Text("Kein Transkript")
+            Text("No Transcript")
                 .font(.headline)
-            Text("In dieser Aufnahme wurde keine Sprache erkannt.\nDu kannst sie oben trotzdem abspielen.")
+            Text("No speech was detected in this recording.\nYou can still play it back above.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
@@ -216,12 +216,12 @@ struct RecordingDetailView: View {
                     let url = URL(fileURLWithPath: recording.sourcePath)
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 } label: {
-                    Label("Im Finder zeigen", systemImage: "folder")
+                    Label("Show in Finder", systemImage: "folder")
                 }
                 Button(role: .destructive) {
                     library.deleteRecording(recording.id)
                 } label: {
-                    Label("Aufnahme löschen", systemImage: "trash")
+                    Label("Delete Recording", systemImage: "trash")
                 }
             }
             .padding(.top, 4)
@@ -235,7 +235,7 @@ struct RecordingDetailView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 48))
                 .foregroundStyle(.orange)
-            Text("Analyse fehlgeschlagen")
+            Text("Analysis Failed")
                 .font(.headline)
             if let msg = recording.errorMessage, !msg.isEmpty {
                 Text(msg)
@@ -248,12 +248,12 @@ struct RecordingDetailView: View {
                 Button {
                     library.retryAnalysis(recordingId: recording.id)
                 } label: {
-                    Label("Erneut versuchen", systemImage: "arrow.clockwise")
+                    Label("Retry", systemImage: "arrow.clockwise")
                 }
                 Button(role: .destructive) {
                     library.deleteRecording(recording.id)
                 } label: {
-                    Label("Aufnahme löschen", systemImage: "trash")
+                    Label("Delete Recording", systemImage: "trash")
                 }
             }
         }
@@ -371,7 +371,7 @@ struct StateBadge: View {
     var body: some View {
         switch state {
         case .recording:
-            Label("Aufnahme", systemImage: "record.circle")
+            Label("Recording", systemImage: "record.circle")
                 .labelStyle(.titleAndIcon)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(.red.opacity(0.2)).foregroundStyle(.red)
@@ -384,13 +384,13 @@ struct StateBadge: View {
                 .font(.caption2.weight(.semibold))
                 .clipShape(Capsule())
         case .empty:
-            Label("Kein Transkript", systemImage: "text.bubble")
+            Label("No Transcript", systemImage: "text.bubble")
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(.gray.opacity(0.2)).foregroundStyle(.secondary)
                 .font(.caption2.weight(.semibold))
                 .clipShape(Capsule())
         case .failed:
-            Label("Fehlgeschlagen", systemImage: "exclamationmark.triangle")
+            Label("Failed", systemImage: "exclamationmark.triangle")
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(.orange.opacity(0.2)).foregroundStyle(.orange)
                 .font(.caption2.weight(.semibold))
@@ -467,26 +467,26 @@ struct SegmentRow: View {
 
     private var speakerMenu: some View {
         Menu {
-            Section("Anderem Sprecher zuordnen") {
+            Section("Assign to another speaker") {
                 ForEach(allSpeakers, id: \.id) { sp in
                     Button {
                         onAssignSpeaker(sp.id)
                     } label: {
-                        Label(sp.label ?? "Unbekannt-\(String(sp.id.suffix(6)))",
+                        Label(sp.label ?? "Unknown-\(String(sp.id.suffix(6)))",
                               systemImage: sp.id == segment.speakerId ? "checkmark" : "circle.fill")
                     }
                 }
                 Button {
                     onAssignSpeaker(nil)
                 } label: {
-                    Label("Neuer Sprecher …", systemImage: "person.badge.plus")
+                    Label("New Speaker …", systemImage: "person.badge.plus")
                 }
             }
             Divider()
             Button {
                 onStartRename()
             } label: {
-                Label("Aktuellen Sprecher umbenennen …", systemImage: "pencil")
+                Label("Rename current speaker …", systemImage: "pencil")
             }
             .disabled(segment.speakerId == nil)
         } label: {

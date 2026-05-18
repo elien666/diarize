@@ -9,13 +9,13 @@ public enum MarkdownRenderer {
         segments: [RecordingSegment],
         speakerLabel: (String) -> String
     ) -> String {
-        var out = "# \(title ?? "Aufnahme") — \(formatDate(date))\n"
+        var out = "# \(title ?? "Recording") — \(formatDate(date))\n"
         let speakerNames = orderedSpeakers(in: segments).map { speakerLabel($0) }
-        out += "**Dauer:** \(formatDuration(durationSec)) · **Sprache:** \(language)"
+        out += "**Duration:** \(formatDuration(durationSec)) · **Language:** \(language)"
         if !speakerNames.isEmpty {
-            out += " · **Sprecher:** \(speakerNames.joined(separator: ", "))"
+            out += " · **Speakers:** \(speakerNames.joined(separator: ", "))"
         }
-        out += "\n\n## Transkript\n\n"
+        out += "\n\n## Transcript\n\n"
 
         for seg in segments {
             let ts = formatTimestamp(seg.startSec)

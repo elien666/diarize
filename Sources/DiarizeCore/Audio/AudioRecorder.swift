@@ -27,10 +27,10 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         case systemAudioUnavailable(String)
         public var errorDescription: String? {
             switch self {
-            case .noSourcesSelected: return "Keine Audioquelle ausgewählt (mic und/oder system)."
-            case .audioEngineFailedToStart(let msg): return "Audio-Engine konnte nicht starten: \(msg)"
-            case .writerFailedToOpen(let msg): return "WAV-Writer konnte nicht öffnen: \(msg)"
-            case .systemAudioUnavailable(let msg): return "System-Audio nicht verfügbar: \(msg). Brauchst du Bildschirmaufnahme-Berechtigung?"
+            case .noSourcesSelected: return "No audio source selected (mic and/or system)."
+            case .audioEngineFailedToStart(let msg): return "Audio engine failed to start: \(msg)"
+            case .writerFailedToOpen(let msg): return "WAV writer failed to open: \(msg)"
+            case .systemAudioUnavailable(let msg): return "System audio unavailable: \(msg). Do you have Screen Recording permission?"
             }
         }
     }
@@ -109,7 +109,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0 else {
-            throw RecorderError.audioEngineFailedToStart("Mikrofon liefert keine gültige Sample-Rate (Berechtigung erteilt?)")
+            throw RecorderError.audioEngineFailedToStart("Microphone is not providing a valid sample rate (permission granted?)")
         }
 
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
@@ -132,7 +132,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         do {
             let content = try await SCShareableContent.current
             guard let display = content.displays.first else {
-                throw RecorderError.systemAudioUnavailable("kein Display gefunden")
+                throw RecorderError.systemAudioUnavailable("no display found")
             }
             let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
             let cfg = SCStreamConfiguration()

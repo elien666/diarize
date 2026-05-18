@@ -61,7 +61,7 @@ final class LibraryViewModel: ObservableObject {
                 try? store.setProcessingState(
                     recordingId: r.id,
                     state: .failed,
-                    errorMessage: "Aufnahme wurde durch App-Neustart unterbrochen. Du kannst sie abspielen oder die Analyse erneut versuchen."
+                    errorMessage: "Recording was interrupted by an app restart. You can play it back or retry analysis."
                 )
             }
         }
@@ -82,7 +82,7 @@ final class LibraryViewModel: ObservableObject {
         if let s = speakers.first(where: { $0.id == id }), let label = s.label {
             return label
         }
-        return "Unbekannt-\(String(id.suffix(6)))"
+        return "Unknown-\(String(id.suffix(6)))"
     }
 
     func segmentCount(speakerId: String) -> Int { (try? store.segmentCount(speakerId: speakerId)) ?? 0 }
@@ -131,7 +131,7 @@ final class LibraryViewModel: ObservableObject {
             recorder = try AudioRecorder(config: AudioRecorder.Config(sources: sources, outputURL: outputURL))
         } catch {
             presentError(
-                title: "Aufnahme konnte nicht gestartet werden",
+                title: "Recording could not be started",
                 message: Self.formatRecorderError(error)
             )
             return
@@ -139,8 +139,8 @@ final class LibraryViewModel: ObservableObject {
 
         // Create the Recording row immediately so it appears in the sidebar.
         let recordingId = "rec_" + UUID().uuidString
-        let title = "Aufnahme \(humanTimestamp(Date()))"
-        let baseName = "\(stamp)-aufnahme"
+        let title = "Recording \(humanTimestamp(Date()))"
+        let baseName = "\(stamp)-recording"
         let mdPath = config.transcriptsDir.appendingPathComponent("\(baseName).md")
         let jsonPath = config.transcriptsDir.appendingPathComponent("\(baseName).json")
         let stub = Recording(
@@ -159,7 +159,7 @@ final class LibraryViewModel: ObservableObject {
             try store.insertEmptyRecording(stub)
         } catch {
             presentError(
-                title: "Konnte Aufnahme nicht in der Datenbank anlegen",
+                title: "Could not create recording in database",
                 message: error.localizedDescription
             )
             return
@@ -168,7 +168,7 @@ final class LibraryViewModel: ObservableObject {
         self.activeRecorder = recorder
         self.recordingOutputURL = outputURL
         self.recordingSourcesLabel = sources.map { $0.rawValue }.sorted().joined(separator: "+")
-        self.statusMessage = "Aufnahme läuft (\(recordingSourcesLabel)) …"
+        self.statusMessage = "Recording (\(recordingSourcesLabel)) …"
         self.activeRecordingId = recordingId
         self.recordingStartedAt = Date()
         self.recordingElapsedSec = 0
@@ -186,7 +186,7 @@ final class LibraryViewModel: ObservableObject {
                     if let id { try? self.store.deleteRecording(id: id) }
                     self.reload()
                     self.presentError(
-                        title: "Aufnahme konnte nicht gestartet werden",
+                        title: "Recording could not be started",
                         message: Self.formatRecorderError(error)
                     )
                 }
@@ -198,10 +198,10 @@ final class LibraryViewModel: ObservableObject {
         let base = error.localizedDescription
         let hint = """
 
-        Mögliche Ursachen:
-        • Mikrofon-Berechtigung nicht erteilt → Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon
-        • Bildschirmaufnahme-Berechtigung nicht erteilt (für System-Audio) → Systemeinstellungen → Datenschutz & Sicherheit → Bildschirm- & Systemaudio-Aufnahme
-        • App startest du als swift-run-Binary statt als .app-Bundle — macOS kann der nicht-bundlete Binary keine dauerhafte Berechtigung zuordnen. Baue die .app mit ./Scripts/build-app.sh.
+        Possible causes:
+        • Microphone permission not granted → System Settings → Privacy & Security → Microphone
+        • Screen Recording permission not granted (for system audio) → System Settings → Privacy & Security → Screen & System Audio Recording
+        • Running as a swift-run binary instead of a .app bundle — macOS cannot assign permanent permissions to unbundled binaries. Build the .app with ./Scripts/build-app.sh.
         """
         return base + hint
     }
@@ -218,7 +218,7 @@ final class LibraryViewModel: ObservableObject {
             return
         }
         guard let recorder = activeRecorder, let recordingId = activeRecordingId else { return }
-        statusMessage = "Stoppe Aufnahme …"
+        statusMessage = "Stopping recording …"
         // Flip the row to analyzing right away so the controls disappear immediately,
         // before the async stop/analysis chain finishes.
         try? store.setProcessingState(recordingId: recordingId, state: .analyzing)
@@ -234,7 +234,7 @@ final class LibraryViewModel: ObservableObject {
                     try? self.store.setProcessingState(
                         recordingId: recordingId,
                         state: .failed,
-                        errorMessage: "Während der Aufnahme wurden keine Audio-Samples empfangen.\n\nMögliche Ursachen:\n• Mikrofon-Berechtigung wurde verweigert (Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon)\n• Bildschirm- & Systemaudio-Berechtigung verweigert (für System-Audio)\n• Falsches Eingabegerät\n\nDie WAV ist leer — du kannst die Aufnahme löschen und neu starten."
+                        errorMessage: "No audio samples were received during recording.\n\nPossible causes:\n• Microphone permission denied (System Settings → Privacy & Security → Microphone)\n• Screen & System Audio permission denied (for system audio)\n• Wrong input device\n\nThe WAV file is empty — you can delete the recording and start again."
                     )
                     self.reload()
                     return
@@ -256,7 +256,7 @@ final class LibraryViewModel: ObservableObject {
             return
         }
         guard let recorder = activeRecorder, let url = recordingOutputURL, let recordingId = activeRecordingId else { return }
-        statusMessage = "Aufnahme verworfen."
+        statusMessage = "Recording discarded."
         Task {
             try? await recorder.stop()
             try? FileManager.default.removeItem(at: url)
@@ -272,7 +272,7 @@ final class LibraryViewModel: ObservableObject {
     /// Run the analysis pipeline against an existing recording row (created during live capture).
     private func analyzeRecording(recordingId: String) {
         importInProgress = true
-        statusMessage = "Analysiere …"
+        statusMessage = "Analyzing …"
         let config = self.config
         let store = self.store
         let progress = AppProgress { [weak self] msg in
@@ -288,15 +288,15 @@ final class LibraryViewModel: ObservableObject {
                 )
                 self.importInProgress = false
                 self.statusMessage = result.recording.processingState == .empty
-                    ? "Aufnahme fertig — keine Sprache erkannt."
-                    : "✓ Fertig: \(result.recording.id)"
+                    ? "Recording done — no speech detected."
+                    : "✓ Done: \(result.recording.id)"
                 self.reload()
             } catch {
                 self.importInProgress = false
-                self.statusMessage = "Analyse-Fehler: \(error.localizedDescription)"
+                self.statusMessage = "Analysis error: \(error.localizedDescription)"
                 self.reload()
                 self.presentError(
-                    title: "Analyse fehlgeschlagen",
+                    title: "Analysis failed",
                     message: error.localizedDescription
                 )
             }
@@ -434,7 +434,7 @@ final class LibraryViewModel: ObservableObject {
 
     func transcribe(audioURL: URL, title: String?) {
         importInProgress = true
-        statusMessage = "Transkribiere \(audioURL.lastPathComponent) …"
+        statusMessage = "Transcribing \(audioURL.lastPathComponent) …"
         let config = self.config
         let store = self.store
         let progress = AppProgress { [weak self] msg in
@@ -452,13 +452,13 @@ final class LibraryViewModel: ObservableObject {
                 )
                 self.importInProgress = false
                 self.statusMessage = result.skipped
-                    ? "Bereits archiviert (\(result.recording.id))"
-                    : "✓ Fertig: \(result.recording.id)"
+                    ? "Already archived (\(result.recording.id))"
+                    : "✓ Done: \(result.recording.id)"
                 self.reload()
                 self.selectedRecordingId = result.recording.id
             } catch {
                 self.importInProgress = false
-                self.statusMessage = "Fehler: \(error.localizedDescription)"
+                self.statusMessage = "Error: \(error.localizedDescription)"
             }
         }
     }

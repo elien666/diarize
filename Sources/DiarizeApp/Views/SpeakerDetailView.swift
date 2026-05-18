@@ -31,7 +31,7 @@ struct SpeakerDetailView: View {
                 .fill(SpeakerColors.color(for: speaker.id))
                 .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(speaker.label ?? "Unbenannt-\(String(speaker.id.suffix(6)))")
+                Text(speaker.label ?? "Unnamed-\(String(speaker.id.suffix(6)))")
                     .font(.title2.weight(.semibold))
                 Text(speaker.id)
                     .font(.caption)
@@ -46,15 +46,15 @@ struct SpeakerDetailView: View {
     private var actionsBar: some View {
         let segCount = library.segmentCount(speakerId: speaker.id)
         return HStack(spacing: 8) {
-            TextField("Sprecher-Name", text: $newLabel)
+            TextField("Speaker name", text: $newLabel)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 220)
-            Button("Speichern") {
+            Button("Save") {
                 library.updateLabel(speakerId: speaker.id, name: newLabel)
             }
             .keyboardShortcut(.defaultAction)
             Spacer()
-            Menu("Mergen in …") {
+            Menu("Merge into …") {
                 ForEach(library.speakers.filter { $0.id != speaker.id }, id: \.id) { other in
                     Button(other.label ?? other.id) {
                         library.merge(from: speaker.id, into: other.id)
@@ -65,12 +65,12 @@ struct SpeakerDetailView: View {
             Button(role: .destructive) {
                 library.deleteSpeakerIfEmpty(speaker.id)
             } label: {
-                Label("Löschen", systemImage: "trash")
+                Label("Delete", systemImage: "trash")
             }
             .disabled(segCount > 0)
             .help(segCount > 0
-                  ? "Nur löschbar, wenn keine Segmente diesen Sprecher referenzieren (\(segCount) vorhanden — vorher mergen)"
-                  : "Sprecher und Embeddings entfernen")
+                  ? "Can only be deleted when no segments reference this speaker (\(segCount) present — merge first)"
+                  : "Remove speaker and embeddings")
         }
         .padding(.vertical, 8)
     }
@@ -79,7 +79,7 @@ struct SpeakerDetailView: View {
         Form {
             LabeledContent("Segmente") { Text("\(library.segmentCount(speakerId: speaker.id))") }
             LabeledContent("Sprechzeit") { Text(formatDuration(library.speechTime(speakerId: speaker.id))) }
-            LabeledContent("Erstellt") { Text(speaker.createdAt, format: .dateTime) }
+            LabeledContent("Created") { Text(speaker.createdAt, format: .dateTime) }
         }
         .formStyle(.grouped)
     }
@@ -88,7 +88,7 @@ struct SpeakerDetailView: View {
         let appearances = library.recordings(for: speaker.id)
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Aufnahmen")
+                Text("Recordings")
                     .font(.headline)
                 Text("(\(appearances.count))")
                     .foregroundStyle(.secondary)
@@ -96,7 +96,7 @@ struct SpeakerDetailView: View {
             .padding(.horizontal)
 
             if appearances.isEmpty {
-                Text("Dieser Sprecher hat noch keine Segmente.")
+                Text("This speaker has no segments yet.")
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
             } else {
@@ -107,7 +107,7 @@ struct SpeakerDetailView: View {
                         } label: {
                             HStack(alignment: .top, spacing: 12) {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.recording.title ?? "Aufnahme")
+                                    Text(item.recording.title ?? "Recording")
                                         .font(.body.weight(.medium))
                                         .foregroundStyle(.primary)
                                     HStack(spacing: 8) {
@@ -115,14 +115,14 @@ struct SpeakerDetailView: View {
                                         Text("·")
                                         Text(item.recording.language.uppercased())
                                         Text("·")
-                                        Text("ab \(formatDuration(item.firstAppearance))")
+                                        Text("from \(formatDuration(item.firstAppearance))")
                                     }
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text("\(item.segmentCount) Segmente")
+                                    Text("\(item.segmentCount) segments")
                                         .font(.caption.monospacedDigit())
                                     Text(formatDuration(item.speechTime))
                                         .font(.caption.monospacedDigit())

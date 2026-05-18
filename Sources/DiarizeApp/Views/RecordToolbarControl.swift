@@ -11,25 +11,25 @@ struct RecordToolbarControl: View {
             Button {
                 library.startRecording(sources: [.mic, .system])
             } label: {
-                Label("Mikrofon + System-Audio", systemImage: "person.wave.2")
+                Label("Microphone + System Audio", systemImage: "person.wave.2")
             }
             Button {
                 library.startRecording(sources: [.mic])
             } label: {
-                Label("Nur Mikrofon", systemImage: "mic")
+                Label("Microphone Only", systemImage: "mic")
             }
             Button {
                 library.startRecording(sources: [.system])
             } label: {
-                Label("Nur System-Audio", systemImage: "speaker.wave.3")
+                Label("System Audio Only", systemImage: "speaker.wave.3")
             }
         } label: {
-            Label("Aufnahme starten", systemImage: "record.circle")
+            Label("Start Recording", systemImage: "record.circle")
                 .foregroundStyle(library.isRecording ? Color.secondary : Color.red)
         }
         .help(library.isRecording
-              ? "Eine Aufnahme läuft bereits"
-              : "Live-Aufnahme starten")
+              ? "A recording is already in progress"
+              : "Start a live recording")
         .disabled(library.importInProgress || library.isRecording)
     }
 }

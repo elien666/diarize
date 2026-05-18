@@ -13,7 +13,7 @@ struct RootView: View {
         } detail: {
             DetailRouter()
         }
-        .searchable(text: $searchQuery, placement: .toolbar, prompt: "Suchen …")
+        .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search …")
         .onSubmit(of: .search) { showingSearch = !searchQuery.isEmpty }
         .sheet(isPresented: $showingSearch) {
             SearchSheet(query: searchQuery, isPresented: $showingSearch)
@@ -23,7 +23,7 @@ struct RootView: View {
                 Button {
                     library.openImportDialog()
                 } label: {
-                    Label("Aufnahme hinzufügen", systemImage: "plus")
+                    Label("Add Recording", systemImage: "plus")
                 }
                 .disabled(library.importInProgress || library.isRecording)
             }
@@ -66,14 +66,14 @@ struct DetailRouter: View {
                let recording = library.recordings.first(where: { $0.id == id }) {
                 RecordingDetailView(recording: recording)
             } else {
-                EmptyDetail(text: "Wähle eine Aufnahme aus der Sidebar.")
+                EmptyDetail(text: "Select a recording from the sidebar.")
             }
         case .speakers:
             if let id = library.selectedSpeakerId,
                let speaker = library.speakers.first(where: { $0.id == id }) {
                 SpeakerDetailView(speaker: speaker)
             } else {
-                EmptyDetail(text: "Wähle einen Sprecher aus der Sidebar.")
+                EmptyDetail(text: "Select a speaker from the sidebar.")
             }
         }
     }

@@ -4,7 +4,7 @@ import ArgumentParser
 struct DiarizeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "diarize",
-        abstract: "Transkribiere Audio-Aufnahmen und erkenne Sprecher über Aufnahmen hinweg.",
+        abstract: "Transcribe audio recordings and identify speakers across recordings.",
         version: "0.1.0",
         subcommands: [
             TranscribeCommand.self,
