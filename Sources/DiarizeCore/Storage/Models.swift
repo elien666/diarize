@@ -83,6 +83,7 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
     public var sourceHash: String?
     public var processingState: RecordingProcessingState
     public var errorMessage: String?
+    public var folderId: String?
 
     public static let databaseTableName = "recordings"
 
@@ -97,7 +98,8 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
         createdAt: Date = Date(),
         sourceHash: String? = nil,
         processingState: RecordingProcessingState = .done,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        folderId: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -110,6 +112,23 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
         self.sourceHash = sourceHash
         self.processingState = processingState
         self.errorMessage = errorMessage
+        self.folderId = folderId
+    }
+}
+
+public struct RecordingFolder: Codable, FetchableRecord, MutablePersistableRecord, Sendable {
+    public var id: String
+    public var name: String
+    public var parentId: String?
+    public var createdAt: Date
+
+    public static let databaseTableName = "recording_folders"
+
+    public init(id: String = "fld_" + UUID().uuidString, name: String, parentId: String? = nil, createdAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.parentId = parentId
+        self.createdAt = createdAt
     }
 }
 

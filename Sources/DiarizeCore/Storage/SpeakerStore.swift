@@ -152,6 +152,46 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    // MARK: - Folders
+
+    public func allFolders() throws -> [RecordingFolder] {
+        try dbQueue.read { db in
+            try RecordingFolder.order(Column("name").asc).fetchAll(db)
+        }
+    }
+
+    public func insertFolder(_ folder: RecordingFolder) throws -> RecordingFolder {
+        try dbQueue.write { db in
+            var f = folder
+            try f.insert(db)
+            return f
+        }
+    }
+
+    public func renameFolder(id: String, name: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE recording_folders SET name = ? WHERE id = ?", arguments: [name, id])
+        }
+    }
+
+    public func deleteFolder(id: String) throws {
+        try dbQueue.write { db in
+            _ = try RecordingFolder.deleteOne(db, key: id)
+        }
+    }
+
+    public func moveRecording(id: String, toFolderId: String?) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE recordings SET folderId = ? WHERE id = ?", arguments: [toFolderId, id])
+        }
+    }
+
+    public func updateRecordingTitle(id: String, title: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "UPDATE recordings SET title = ? WHERE id = ?", arguments: [title, id])
+        }
+    }
+
     // MARK: - Recordings & Segments
 
     public func insertRecording(_ recording: Recording, segments: [RecordingSegment]) throws {

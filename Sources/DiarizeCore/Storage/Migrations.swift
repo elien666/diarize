@@ -92,5 +92,17 @@ enum Migrations {
                 t.add(column: "errorMessage", .text)
             }
         }
+
+        migrator.registerMigration("v5_folders") { db in
+            try db.create(table: "recording_folders") { t in
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("parentId", .text).references("recording_folders", onDelete: .cascade)
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.alter(table: "recordings") { t in
+                t.add(column: "folderId", .text).references("recording_folders", onDelete: .setNull)
+            }
+        }
     }
 }

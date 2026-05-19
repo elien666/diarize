@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 final class LibraryViewModel: ObservableObject {
     @Published var recordings: [Recording] = []
     @Published var speakers: [Speaker] = []
+    @Published var folders: [RecordingFolder] = []
     @Published var selectedRecordingId: String?
     @Published var selectedSpeakerId: String?
     @Published var sidebarSection: SidebarSection = .recordings
@@ -75,6 +76,7 @@ final class LibraryViewModel: ObservableObject {
     func reload() {
         recordings = (try? store.allRecordings()) ?? []
         speakers = (try? store.allSpeakers()) ?? []
+        folders = (try? store.allFolders()) ?? []
     }
 
     func speakerLabel(for id: String?) -> String {
@@ -417,6 +419,40 @@ final class LibraryViewModel: ObservableObject {
 
     func search(_ query: String) -> [SearchHit] {
         (try? searchService.search(query: query, options: SearchOptions(limit: 50))) ?? []
+    }
+
+    // MARK: - Rename & Folders
+
+    func renameRecording(_ recordingId: String, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try? store.updateRecordingTitle(id: recordingId, title: trimmed)
+        reload()
+    }
+
+    @discardableResult
+    func createFolder(name: String, parentId: String? = nil) -> RecordingFolder? {
+        let folder = RecordingFolder(name: name, parentId: parentId)
+        let inserted = try? store.insertFolder(folder)
+        reload()
+        return inserted
+    }
+
+    func renameFolder(_ folderId: String, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try? store.renameFolder(id: folderId, name: trimmed)
+        reload()
+    }
+
+    func deleteFolder(_ folderId: String) {
+        try? store.deleteFolder(id: folderId)
+        reload()
+    }
+
+    func moveRecording(_ recordingId: String, toFolder folderId: String?) {
+        try? store.moveRecording(id: recordingId, toFolderId: folderId)
+        reload()
     }
 
     // MARK: - Import
