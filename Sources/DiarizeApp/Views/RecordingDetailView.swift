@@ -110,6 +110,10 @@ struct RecordingDetailView: View {
                         NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
                     }
                     .controlSize(.small)
+                    Button("Show in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording.transcriptMd)])
+                    }
+                    .controlSize(.small)
                     Button(role: .destructive) {
                         pendingDelete = true
                     } label: {
