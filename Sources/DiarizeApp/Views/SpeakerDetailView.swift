@@ -6,6 +6,9 @@ struct SpeakerDetailView: View {
     @EnvironmentObject var library: LibraryViewModel
     @State private var newLabel: String = ""
     @State private var mergeTargetId: String?
+    @State private var showSimilarities = false
+    @State private var similarities: [(speaker: Speaker, similarity: Float)] = []
+    @State private var loadingSimilarities = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -16,6 +19,7 @@ struct SpeakerDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     metadataList
+                    similaritySection
                     appearancesList
                 }
                 .padding(.top, 8)
@@ -82,6 +86,71 @@ struct SpeakerDetailView: View {
             LabeledContent("Created") { Text(speaker.createdAt, format: .dateTime) }
         }
         .formStyle(.grouped)
+    }
+
+    private var similaritySection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DisclosureGroup(isExpanded: $showSimilarities) {
+                if loadingSimilarities {
+                    ProgressView()
+                        .padding(.vertical, 8)
+                        .padding(.horizontal)
+                } else if similarities.isEmpty {
+                    Text("No other speakers with embeddings.")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(similarities.enumerated()), id: \.element.speaker.id) { idx, entry in
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(SpeakerColors.color(for: entry.speaker.id))
+                                    .frame(width: 8, height: 8)
+                                Text(entry.speaker.label ?? "Unnamed-\(String(entry.speaker.id.suffix(6)))")
+                                    .font(.caption)
+                                Spacer()
+                                Text(String(format: "%.3f", entry.similarity))
+                                    .monospacedDigit()
+                                    .font(.caption)
+                                    .foregroundStyle(entry.similarity >= library.config.similarityThreshold ? .green : .secondary)
+                                if entry.similarity >= library.config.similarityThreshold {
+                                    Button("Merge") {
+                                        library.merge(from: speaker.id, into: entry.speaker.id)
+                                    }
+                                    .controlSize(.mini)
+                                }
+                            }
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 12)
+                            .background(idx.isMultiple(of: 2) ? Color.clear : Color.secondary.opacity(0.05))
+                        }
+                    }
+                    .background(Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(6)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                }
+            } label: {
+                Text("Similarity to Other Speakers")
+                    .font(.headline)
+                    .padding(.horizontal)
+                    .padding(.vertical, 6)
+            }
+            .onChange(of: showSimilarities) { _, expanded in
+                if expanded && similarities.isEmpty && !loadingSimilarities {
+                    loadingSimilarities = true
+                    Task {
+                        let result = await library.speakerSimilarities(for: speaker.id)
+                        await MainActor.run {
+                            similarities = result.map { (speaker: $0.0, similarity: $0.1) }
+                            loadingSimilarities = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var appearancesList: some View {

@@ -114,6 +114,10 @@ struct RecordingDetailView: View {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording.transcriptMd)])
                     }
                     .controlSize(.small)
+                    Button("Re-analyze") {
+                        library.retryAnalysis(recordingId: recording.id)
+                    }
+                    .controlSize(.small)
                     Button(role: .destructive) {
                         pendingDelete = true
                     } label: {

@@ -26,7 +26,7 @@ final class LibraryViewModel: ObservableObject {
         statusMessage = title
     }
 
-    let config: AppConfig
+    @Published var config: AppConfig
     let store: SpeakerStore
     let searchService: SearchService
 
@@ -36,9 +36,10 @@ final class LibraryViewModel: ObservableObject {
     }
 
     init() {
-        self.config = AppConfigLoader.load()
-        try? config.ensureDirectories()
-        self.store = (try? SpeakerStore(path: config.databasePath)) ?? Self.fallbackStore()
+        let loadedConfig = AppConfigLoader.load()
+        self.config = loadedConfig
+        try? loadedConfig.ensureDirectories()
+        self.store = (try? SpeakerStore(path: loadedConfig.databasePath)) ?? Self.fallbackStore()
         self.searchService = SearchService(store: store)
         recoverOrphanedRecordings()
         reload()
@@ -120,7 +121,11 @@ final class LibraryViewModel: ObservableObject {
 
     var isRecording: Bool { activeRecordingId != nil }
 
-    func startRecording(sources: Set<AudioRecorder.Source>) {
+    func startRecording(
+        sources: Set<AudioRecorder.Source>,
+        title: String = "",
+        language: AppConfig.Language? = nil
+    ) {
         guard !isRecording else { return }
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd-HHmmss"
@@ -141,16 +146,19 @@ final class LibraryViewModel: ObservableObject {
 
         // Create the Recording row immediately so it appears in the sidebar.
         let recordingId = "rec_" + UUID().uuidString
-        let title = "Recording \(humanTimestamp(Date()))"
+        let resolvedTitle = title.trimmingCharacters(in: .whitespaces).isEmpty
+            ? "Recording \(humanTimestamp(Date()))"
+            : title.trimmingCharacters(in: .whitespaces)
+        let resolvedLanguage = language ?? config.defaultLanguage
         let baseName = "\(stamp)-recording"
         let mdPath = config.transcriptsDir.appendingPathComponent("\(baseName).md")
         let jsonPath = config.transcriptsDir.appendingPathComponent("\(baseName).json")
         let stub = Recording(
             id: recordingId,
-            title: title,
+            title: resolvedTitle,
             sourcePath: outputURL.path,
             durationSec: 0,
-            language: config.defaultLanguage.rawValue,
+            language: resolvedLanguage.rawValue,
             transcriptMd: mdPath.path,
             transcriptJson: jsonPath.path,
             createdAt: Date(),
@@ -508,6 +516,135 @@ final class LibraryViewModel: ObservableObject {
     ) async throws -> TranscribeOutput {
         let pipeline = TranscribePipeline(config: config, store: store, progress: progress)
         return try await pipeline.run(audioPath: audioURL, title: title, language: nil, duplicatePolicy: .skip)
+    }
+
+    // MARK: - Settings / Config
+
+    func updateDefaultLanguage(_ lang: AppConfig.Language) {
+        writeConfigValue(key: "default.language", value: lang.rawValue)
+        config.defaultLanguage = lang
+    }
+
+    func updateSimilarityThreshold(_ value: Float) {
+        writeConfigValue(key: "similarity.threshold", value: String(format: "%.2f", value))
+        config.similarityThreshold = value
+    }
+
+    /// Writes `archive.path` to config.json. The change takes effect after restart
+    /// because the SpeakerStore database connection cannot be hot-swapped.
+    func updateArchivePath(_ url: URL) {
+        let configFile = Self.configFileURL()
+        var json = Self.readConfigJSON(from: configFile)
+        var archive = (json["archive"] as? [String: Any]) ?? [:]
+        archive["path"] = url.path
+        json["archive"] = archive
+        try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+            .write(to: configFile)
+        // Don't update self.config.archivePath — needs restart to reinit the database.
+    }
+
+    func recalibrateThreshold() async -> CalibrationResult? {
+        let store = self.store
+        return try? ThresholdCalibrator.calibrate(store: store)
+    }
+
+    func rerenderAllTranscripts() {
+        guard !importInProgress else { return }
+        importInProgress = true
+        statusMessage = "Re-rendering transcripts …"
+        let config = self.config
+        let store = self.store
+        let ids = recordings.map { $0.id }
+        Task {
+            let pipeline = TranscribePipeline(config: config, store: store)
+            for id in ids {
+                try? pipeline.rerender(recordingId: id)
+            }
+            await MainActor.run {
+                self.importInProgress = false
+                self.statusMessage = "✓ Re-rendered \(ids.count) recordings"
+                self.reload()
+            }
+        }
+    }
+
+    func deduplicateArchive() async -> Int {
+        let store = self.store
+        let dupes = (try? store.allRecordings()) ?? []
+        var seen: [String: String] = [:]  // hash → keep id (most recent)
+        var toDelete: [String] = []
+        // sort newest-first so the first occurrence we see is the keeper
+        let sorted = dupes.compactMap { $0 }.sorted { $0.createdAt > $1.createdAt }
+        for rec in sorted {
+            guard let hash = rec.sourceHash else { continue }
+            if seen[hash] != nil {
+                toDelete.append(rec.id)
+            } else {
+                seen[hash] = rec.id
+            }
+        }
+        for id in toDelete {
+            try? store.deleteRecording(id: id)
+        }
+        await MainActor.run { self.reload() }
+        return toDelete.count
+    }
+
+    func backfillHashes() async {
+        let store = self.store
+        let all = (try? store.allRecordings()) ?? []
+        var count = 0
+        for rec in all where rec.sourceHash == nil {
+            let url = URL(fileURLWithPath: rec.sourcePath)
+            guard let hash = try? AudioHasher.sha256(of: url) else { continue }
+            try? store.setSourceHash(recordingId: rec.id, hash: hash)
+            count += 1
+        }
+        await MainActor.run {
+            self.statusMessage = "✓ Backfilled \(count) hashes"
+            self.reload()
+        }
+    }
+
+    func speakerSimilarities(for speakerId: String) async -> [(Speaker, Float)] {
+        let store = self.store
+        guard let targetEmbs = try? store.embeddings(for: speakerId), !targetEmbs.isEmpty else { return [] }
+        guard let targetCentroid = MathUtil.mean(of: targetEmbs.map { $0.asFloats }) else { return [] }
+        let allSpeakers = (try? store.allSpeakers()) ?? []
+        var results: [(Speaker, Float)] = []
+        for speaker in allSpeakers where speaker.id != speakerId {
+            guard let embs = try? store.embeddings(for: speaker.id), !embs.isEmpty else { continue }
+            guard let centroid = MathUtil.mean(of: embs.map { $0.asFloats }) else { continue }
+            let sim = MathUtil.cosineSimilarity(targetCentroid, centroid)
+            results.append((speaker, sim))
+        }
+        return results.sorted { $0.1 > $1.1 }
+    }
+
+    // MARK: - Config helpers
+
+    private static func configFileURL() -> URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/diarize/config.json")
+    }
+
+    private static func readConfigJSON(from url: URL) -> [String: Any] {
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return json
+    }
+
+    private func writeConfigValue(key: String, value: String) {
+        let configFile = Self.configFileURL()
+        try? FileManager.default.createDirectory(
+            at: configFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        var json = Self.readConfigJSON(from: configFile)
+        json[key] = value
+        try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+            .write(to: configFile)
     }
 }
 

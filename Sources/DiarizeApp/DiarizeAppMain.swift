@@ -36,5 +36,10 @@ struct DiarizeAppMain: App {
                     .keyboardShortcut("r")
             }
         }
+
+        Settings {
+            SettingsView()
+                .environmentObject(library)
+        }
     }
 }
