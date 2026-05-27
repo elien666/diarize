@@ -5,6 +5,8 @@ import DiarizeCore
 @main
 struct DiarizeAppMain: App {
     @StateObject private var library = LibraryViewModel()
+    // Stored as a property so ARC keeps it alive for the lifetime of the app.
+    @State private var statusBar: StatusBarController?
 
     init() {
         // SwiftPM executables default to background-tool (no Dock icon, no window focus).
@@ -18,6 +20,11 @@ struct DiarizeAppMain: App {
             RootView()
                 .environmentObject(library)
                 .frame(minWidth: 1000, minHeight: 600)
+                .onAppear {
+                    if statusBar == nil {
+                        statusBar = StatusBarController(library: library)
+                    }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)

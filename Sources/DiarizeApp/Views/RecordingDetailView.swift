@@ -144,11 +144,7 @@ struct RecordingDetailView: View {
 
     private var liveRecordingBar: some View {
         HStack(spacing: 12) {
-            Circle()
-                .fill(.red)
-                .frame(width: 12, height: 12)
-                .opacity(0.4)
-                .overlay(Circle().stroke(.red))
+            RecordingPulse()
             Text(formatDuration(library.recordingElapsedSec))
                 .monospacedDigit()
                 .font(.title3.weight(.medium))
@@ -575,5 +571,24 @@ struct SegmentRow: View {
         let m = (total % 3600) / 60
         let s = total % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+}
+
+private struct RecordingPulse: View {
+    @State private var pulsing = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(.red.opacity(0.25))
+                .frame(width: 22, height: 22)
+                .scaleEffect(pulsing ? 1.0 : 0.5)
+                .opacity(pulsing ? 0 : 1)
+                .animation(.easeOut(duration: 1.1).repeatForever(autoreverses: false), value: pulsing)
+            Circle()
+                .fill(.red)
+                .frame(width: 10, height: 10)
+        }
+        .onAppear { pulsing = true }
     }
 }
