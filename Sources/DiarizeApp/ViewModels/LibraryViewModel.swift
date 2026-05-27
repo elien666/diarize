@@ -578,7 +578,7 @@ final class LibraryViewModel: ObservableObject {
         Task {
             let pipeline = TranscribePipeline(config: config, store: store)
             for id in ids {
-                try? pipeline.rerender(recordingId: id)
+                _ = try? pipeline.rerender(recordingId: id)
             }
             await MainActor.run {
                 self.importInProgress = false
