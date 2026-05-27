@@ -45,6 +45,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
 
     private var systemStream: SCStream?
     private var systemOutput: SystemAudioOutput?
+    private var processTapBox: AnyObject?
 
     public init(config: Config) throws {
         guard !config.sources.isEmpty else { throw RecorderError.noSourcesSelected }
@@ -95,10 +96,16 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
         }
-        if config.sources.contains(.system), let stream = systemStream {
-            try? await stream.stopCapture()
-            systemStream = nil
-            systemOutput = nil
+        if config.sources.contains(.system) {
+            if let stream = systemStream {
+                try? await stream.stopCapture()
+                systemStream = nil
+                systemOutput = nil
+            }
+            if #available(macOS 14.2, *) {
+                (processTapBox as? ProcessAudioTap)?.stop()
+            }
+            processTapBox = nil
         }
         try mixer.flushAndClose()
     }
@@ -129,6 +136,36 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     // MARK: - System Audio
 
     private func startSystem() async throws {
+        // On macOS 14.2+ prefer a global process tap which captures audio from all
+        // processes regardless of which output device they use. This fixes apps like
+        // Teams that route audio to a dedicated device instead of the system default.
+        if #available(macOS 14.2, *) {
+            do {
+                try startProcessTap()
+                return
+            } catch {
+                NSLog("[diarize] Process tap failed (\(error.localizedDescription)), falling back to SCStream")
+            }
+        }
+        try await startSCStream()
+    }
+
+    @available(macOS 14.2, *)
+    private func startProcessTap() throws {
+        let tap = ProcessAudioTap(targetFormat: targetFormat) { [weak self] samples in
+            guard let self else { return }
+            self.samplesReceived[.system, default: 0] += samples.count
+            self.mixer.append(samples, channel: .system)
+        }
+        do {
+            try tap.start()
+        } catch {
+            throw RecorderError.systemAudioUnavailable(error.localizedDescription)
+        }
+        self.processTapBox = tap
+    }
+
+    private func startSCStream() async throws {
         do {
             let content = try await SCShareableContent.current
             guard let display = content.displays.first else {
