@@ -20,9 +20,9 @@ struct DiarizeAppMain: App {
             RootView()
                 .environmentObject(library)
                 .frame(minWidth: 1000, minHeight: 600)
-                .onAppear {
-                    if statusBar == nil {
-                        statusBar = StatusBarController(library: library)
+                .withHostingWindow { window in
+                    if statusBar == nil, let window {
+                        statusBar = StatusBarController(library: library, window: window)
                     }
                 }
         }

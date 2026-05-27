@@ -11,13 +11,21 @@ import Combine
 final class StatusBarController {
     private let statusItem: NSStatusItem
     private var cancellables: Set<AnyCancellable> = []
+    // Shim that bridges NSStatusBarButton target/action to a Swift closure,
+    // avoiding @MainActor isolation issues with #selector.
+    private let actionShim = ActionShim()
 
-    init(library: LibraryViewModel) {
+    private weak var mainWindow: NSWindow?
+
+    init(library: LibraryViewModel, window: NSWindow) {
+        self.mainWindow = window
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         updateIcon(isRecording: false)
 
-        statusItem.button?.action = #selector(handleClick)
-        statusItem.button?.target = self
+        actionShim.handler = { [weak self] in self?.handleClick() }
+        statusItem.button?.action = #selector(ActionShim.fire)
+        statusItem.button?.target = actionShim
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         library.$activeRecordingId
@@ -36,8 +44,8 @@ final class StatusBarController {
         statusItem.button?.image = image
     }
 
-    @objc private func handleClick() {
-        guard let window = NSApplication.shared.windows.first(where: { $0.title == "diarize" || $0.identifier?.rawValue == "diarize" }) ?? NSApplication.shared.windows.first else { return }
+    private func handleClick() {
+        guard let window = mainWindow else { return }
         if window.isVisible {
             window.orderOut(nil)
             NSApplication.shared.setActivationPolicy(.accessory)
@@ -47,4 +55,10 @@ final class StatusBarController {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
+}
+
+// NSObject subclass so #selector works without @objc on a @MainActor type.
+private final class ActionShim: NSObject {
+    var handler: (() -> Void)?
+    @objc func fire() { handler?() }
 }
