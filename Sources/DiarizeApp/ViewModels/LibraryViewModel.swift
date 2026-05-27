@@ -14,6 +14,13 @@ final class LibraryViewModel: ObservableObject {
     @Published var importInProgress: Bool = false
     @Published var statusMessage: String = ""
     @Published var errorAlert: ErrorAlert?
+    @Published var analysisProgress: ProgressState? = nil
+    @Published var activeAnalysisId: String? = nil
+
+    struct ProgressState {
+        var phase: String
+        var fraction: Double?   // 0.0–1.0, nil = indeterminate
+    }
 
     struct ErrorAlert: Identifiable {
         let id = UUID()
@@ -282,11 +289,15 @@ final class LibraryViewModel: ObservableObject {
     /// Run the analysis pipeline against an existing recording row (created during live capture).
     private func analyzeRecording(recordingId: String) {
         importInProgress = true
+        activeAnalysisId = recordingId
         statusMessage = "Analyzing …"
         let config = self.config
         let store = self.store
         let progress = AppProgress { [weak self] msg in
-            Task { @MainActor in self?.statusMessage = msg }
+            Task { @MainActor in
+                self?.statusMessage = msg
+                self?.analysisProgress = Self.parseProgress(msg)
+            }
         }
         Task { @MainActor in
             do {
@@ -297,12 +308,16 @@ final class LibraryViewModel: ObservableObject {
                     recordingId: recordingId
                 )
                 self.importInProgress = false
+                self.activeAnalysisId = nil
+                self.analysisProgress = nil
                 self.statusMessage = result.recording.processingState == .empty
                     ? "Recording done — no speech detected."
                     : "✓ Done: \(result.recording.id)"
                 self.reload()
             } catch {
                 self.importInProgress = false
+                self.activeAnalysisId = nil
+                self.analysisProgress = nil
                 self.statusMessage = "Analysis error: \(error.localizedDescription)"
                 self.reload()
                 self.presentError(
@@ -482,7 +497,10 @@ final class LibraryViewModel: ObservableObject {
         let config = self.config
         let store = self.store
         let progress = AppProgress { [weak self] msg in
-            Task { @MainActor in self?.statusMessage = msg }
+            Task { @MainActor in
+                self?.statusMessage = msg
+                self?.analysisProgress = Self.parseProgress(msg)
+            }
         }
 
         Task { @MainActor in
@@ -495,6 +513,7 @@ final class LibraryViewModel: ObservableObject {
                     title: title
                 )
                 self.importInProgress = false
+                self.analysisProgress = nil
                 self.statusMessage = result.skipped
                     ? "Already archived (\(result.recording.id))"
                     : "✓ Done: \(result.recording.id)"
@@ -502,6 +521,7 @@ final class LibraryViewModel: ObservableObject {
                 self.selectedRecordingId = result.recording.id
             } catch {
                 self.importInProgress = false
+                self.analysisProgress = nil
                 self.statusMessage = "Error: \(error.localizedDescription)"
             }
         }
@@ -619,6 +639,31 @@ final class LibraryViewModel: ObservableObject {
             results.append((speaker, sim))
         }
         return results.sorted { $0.1 > $1.1 }
+    }
+
+    // MARK: - Progress parsing
+
+    static func parseProgress(_ message: String) -> ProgressState {
+        // ASR sub-progress: "Transcribing [12/48] 25%"
+        if message.hasPrefix("Transcribing [") {
+            let pct: Double? = message
+                .components(separatedBy: "] ")
+                .last
+                .flatMap { $0.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces) }
+                .flatMap(Double.init)
+            let fraction = pct.map { 0.60 + ($0 / 100.0) * 0.38 }
+            return ProgressState(phase: "Transcribing", fraction: fraction)
+        }
+        switch true {
+        case message.hasPrefix("Loading audio"):          return ProgressState(phase: "Loading audio",      fraction: 0.05)
+        case message.hasPrefix("Loading diarization"):    return ProgressState(phase: "Loading models",     fraction: 0.10)
+        case message.hasPrefix("Running diarization"):    return ProgressState(phase: "Diarizing",          fraction: nil)
+        case message.hasPrefix("Diarized:"):              return ProgressState(phase: "Diarizing",          fraction: 0.35)
+        case message.hasPrefix("Speaker matching"):       return ProgressState(phase: "Matching speakers",  fraction: 0.55)
+        case message.hasPrefix("Loading ASR"):            return ProgressState(phase: "Loading ASR",        fraction: 0.60)
+        case message.hasPrefix("Persisting"):             return ProgressState(phase: "Saving",             fraction: 0.98)
+        default:                                          return ProgressState(phase: message,              fraction: nil)
+        }
     }
 
     // MARK: - Config helpers

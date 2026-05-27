@@ -52,11 +52,19 @@ struct StatusBar: View {
     @EnvironmentObject var library: LibraryViewModel
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             if library.importInProgress {
-                ProgressView().controlSize(.small)
+                if let progress = library.analysisProgress, let fraction = progress.fraction {
+                    ProgressView(value: fraction, total: 1.0)
+                        .progressViewStyle(.linear)
+                        .frame(width: 80)
+                        .controlSize(.small)
+                } else if library.importInProgress {
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
-            Text(library.statusMessage.isEmpty ? " " : library.statusMessage)
+            Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -68,6 +76,13 @@ struct StatusBar: View {
         .overlay(alignment: .top) {
             Divider()
         }
+    }
+
+    private var label: String {
+        if let progress = library.analysisProgress {
+            return progress.phase
+        }
+        return library.statusMessage.isEmpty ? " " : library.statusMessage
     }
 }
 

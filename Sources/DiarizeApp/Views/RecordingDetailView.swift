@@ -139,11 +139,30 @@ struct RecordingDetailView: View {
         if isLiveRecording {
             liveRecordingBar
         } else if recording.processingState == .analyzing {
-            // While analyzing, file isn't seekable yet; hide player to avoid empty controls.
-            EmptyView()
+            analyzingBar
         } else {
             playerBar
         }
+    }
+
+    private var analyzingBar: some View {
+        let progress = library.activeAnalysisId == recording.id ? library.analysisProgress : nil
+        return HStack(spacing: 12) {
+            if let fraction = progress?.fraction {
+                ProgressView(value: fraction, total: 1.0)
+                    .progressViewStyle(.linear)
+                    .frame(maxWidth: 160)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Text(progress?.phase ?? "Analyzing …")
+                .foregroundStyle(.secondary)
+                .font(.callout)
+            Spacer()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 12)
     }
 
     private var liveRecordingBar: some View {
