@@ -21,6 +21,12 @@ public final class AudioMixer: @unchecked Sendable {
     private let writer: WAVWriter
     private let queue = DispatchQueue(label: "diarize.mixer")
     private var buffers: [[Float]] = [[], []]
+    /// Read head per channel: index of the first un-committed sample in `buffers[ch]`.
+    /// Committing advances the head instead of `removeFirst` (which would free+realloc
+    /// the backing store on every flush). The committed prefix is dropped lazily once
+    /// the head grows past `compactThreshold`.
+    private var heads: [Int] = [0, 0]
+    private let compactThreshold = 16384
     private var enabledChannels: Set<Channel>
     /// Wall-clock of last sample arrival per channel; used to detect that a channel
     /// is silent (e.g. system audio with nothing playing) so we don't stall.
@@ -44,6 +50,7 @@ public final class AudioMixer: @unchecked Sendable {
         queue.async {
             self.enabledChannels.remove(channel)
             self.buffers[channel.rawValue].removeAll()
+            self.heads[channel.rawValue] = 0
             self.flushIfPossible()
         }
     }
@@ -53,7 +60,8 @@ public final class AudioMixer: @unchecked Sendable {
         queue.async {
             self.buffers[channel.rawValue].append(contentsOf: samples)
             self.lastActivity[channel.rawValue] = Date()
-            self.flushIfPossible()
+            // Flushing is driven solely by the 100ms tick timer; appending only buffers.
+            // This decouples commit/write cadence from the audio-callback rate.
         }
     }
 
@@ -76,7 +84,7 @@ public final class AudioMixer: @unchecked Sendable {
         var activeCounts: [Int] = []
         var anyHasData = false
         for ch in enabledChannels {
-            let raw = buffers[ch.rawValue].count
+            let raw = available(ch)
             if raw > 0 { anyHasData = true }
             let active = now.timeIntervalSince(lastActivity[ch.rawValue]) <= silenceTimeoutSeconds
             if active { activeCounts.append(raw) }
@@ -89,24 +97,38 @@ public final class AudioMixer: @unchecked Sendable {
         if let activeMin = activeCounts.min(), activeMin > 0 {
             commit = activeMin
         } else {
-            commit = enabledChannels.map { buffers[$0.rawValue].count }.max() ?? 0
+            commit = enabledChannels.map { available($0) }.max() ?? 0
         }
         guard commit > 0 else { return }
         commitPrefix(length: commit)
     }
 
     private func flushAll() {
-        let maxLen = enabledChannels.map { buffers[$0.rawValue].count }.max() ?? 0
+        let maxLen = enabledChannels.map { available($0) }.max() ?? 0
         if maxLen > 0 { commitPrefix(length: maxLen) }
+    }
+
+    /// Un-committed samples remaining in a channel's buffer.
+    private func available(_ channel: Channel) -> Int {
+        buffers[channel.rawValue].count - heads[channel.rawValue]
     }
 
     private func commitPrefix(length: Int) {
         var mixed = [Float](repeating: 0, count: length)
         for ch in enabledChannels {
-            let buf = buffers[ch.rawValue]
-            let take = min(length, buf.count)
-            for i in 0..<take { mixed[i] += buf[i] }
-            buffers[ch.rawValue].removeFirst(take)
+            let raw = ch.rawValue
+            let head = heads[raw]
+            let take = min(length, buffers[raw].count - head)
+            if take > 0 {
+                let buf = buffers[raw]
+                for i in 0..<take { mixed[i] += buf[head + i] }
+                heads[raw] = head + take
+            }
+            // Drop the committed prefix lazily so the head can't grow unbounded.
+            if heads[raw] > compactThreshold {
+                buffers[raw].removeFirst(heads[raw])
+                heads[raw] = 0
+            }
         }
         // Soft clip to [-1, 1]
         for i in 0..<mixed.count {
