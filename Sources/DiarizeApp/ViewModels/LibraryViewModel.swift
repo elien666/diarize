@@ -119,11 +119,13 @@ final class LibraryViewModel: ObservableObject {
     // MARK: - Live recording state
 
     @Published var activeRecordingId: String?      // recording row id while live
-    @Published var recordingElapsedSec: Double = 0
+    /// Wall-clock start of the live recording. Published once per recording (set on
+    /// start, cleared on stop) — the live timer view derives elapsed time from this
+    /// via TimelineView, so the ticking display does NOT republish through this model
+    /// and re-render the whole window every second.
+    @Published private(set) var recordingStartedAt: Date?
     @Published var recordingSourcesLabel: String = ""
     private var activeRecorder: AudioRecorder?
-    private var recordingStartedAt: Date?
-    private var recordingTimer: Timer?
     private var recordingOutputURL: URL?
 
     var isRecording: Bool { activeRecordingId != nil }
@@ -188,8 +190,6 @@ final class LibraryViewModel: ObservableObject {
         self.statusMessage = "Recording (\(recordingSourcesLabel)) …"
         self.activeRecordingId = recordingId
         self.recordingStartedAt = Date()
-        self.recordingElapsedSec = 0
-        startTimer()
         reload()
         openRecording(recordingId)
 
@@ -342,24 +342,11 @@ final class LibraryViewModel: ObservableObject {
         return try await pipeline.analyzeExisting(recordingId: recordingId, language: nil)
     }
 
-    private func startTimer() {
-        recordingTimer?.invalidate()
-        recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let start = self.recordingStartedAt else { return }
-                self.recordingElapsedSec = Date().timeIntervalSince(start)
-            }
-        }
-    }
-
     private func cleanupRecorder() {
-        recordingTimer?.invalidate()
-        recordingTimer = nil
         activeRecorder = nil
         recordingOutputURL = nil
         recordingStartedAt = nil
         recordingSourcesLabel = ""
-        recordingElapsedSec = 0
         activeRecordingId = nil
     }
 

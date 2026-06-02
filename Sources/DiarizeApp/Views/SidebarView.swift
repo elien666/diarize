@@ -284,7 +284,6 @@ struct RecordingRow: View {
         case .recording:
             Image(systemName: "record.circle")
                 .foregroundStyle(.red)
-                .symbolEffect(.pulse, isActive: true)
         case .analyzing:
             ProgressView().controlSize(.mini)
         case .empty:

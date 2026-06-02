@@ -168,9 +168,15 @@ struct RecordingDetailView: View {
     private var liveRecordingBar: some View {
         HStack(spacing: 12) {
             RecordingPulse()
-            Text(formatDuration(library.recordingElapsedSec))
-                .monospacedDigit()
-                .font(.title3.weight(.medium))
+            // Drive the elapsed display with a TimelineView so only this text ticks —
+            // not the whole window. (Publishing the elapsed seconds through the shared
+            // view model re-rendered the entire NavigationSplitView every second.)
+            TimelineView(.periodic(from: library.recordingStartedAt ?? .now, by: 1)) { context in
+                let elapsed = (library.recordingStartedAt).map { context.date.timeIntervalSince($0) } ?? 0
+                Text(formatDuration(max(0, elapsed)))
+                    .monospacedDigit()
+                    .font(.title3.weight(.medium))
+            }
             Text(library.recordingSourcesLabel)
                 .foregroundStyle(.secondary)
                 .font(.caption)
@@ -241,10 +247,8 @@ struct RecordingDetailView: View {
 
     private var recordingState: some View {
         VStack(spacing: 16) {
-            Image(systemName: "waveform.badge.mic")
-                .font(.system(size: 56))
-                .foregroundStyle(.red)
-                .symbolEffect(.variableColor.iterative, isActive: true)
+            BreathingSymbol(systemName: "waveform.badge.mic", pointSize: 56, color: .systemRed)
+                .frame(width: 72, height: 72)
             Text("Recording in progress")
                 .font(.headline)
             Text("Stop the recording above with Stop & Analyze.\nDiarization and transcription will run afterwards.")
@@ -597,21 +601,90 @@ struct SegmentRow: View {
     }
 }
 
+/// Blinking red recording dot.
+///
+/// Driven by a `TimelineView` 1 Hz tick rather than a SwiftUI `.repeatForever`
+/// animation. A repeating SwiftUI animation re-evaluates the view graph and
+/// runs an AppKit constraint-layout pass through the surrounding
+/// NavigationSplitView every frame (~33% CPU while recording). The timeline
+/// here fires once per second and updates only this leaf — same cost as the
+/// elapsed-time display, i.e. negligible. The opacity change is implicitly
+/// animated so the blink fades smoothly between ticks (the eased interpolation
+/// is composited by Core Animation, not re-evaluated by SwiftUI per frame).
 private struct RecordingPulse: View {
-    @State private var pulsing = false
-
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(.red.opacity(0.25))
-                .frame(width: 22, height: 22)
-                .scaleEffect(pulsing ? 1.0 : 0.5)
-                .opacity(pulsing ? 0 : 1)
-                .animation(.easeOut(duration: 1.1).repeatForever(autoreverses: false), value: pulsing)
+        TimelineView(.periodic(from: .now, by: 0.7)) { context in
+            // Discrete blink: opacity flips once per tick. No implicit/repeating
+            // SwiftUI animation, so there is no per-frame view-graph work — only
+            // one update per 0.7s, like the elapsed-time display.
+            let on = Int(context.date.timeIntervalSinceReferenceDate / 0.7) % 2 == 0
             Circle()
                 .fill(.red)
                 .frame(width: 10, height: 10)
+                .opacity(on ? 1.0 : 0.25)
         }
-        .onAppear { pulsing = true }
+        .frame(width: 10, height: 10)
+    }
+}
+
+/// An SF Symbol that "breathes" (opacity pulse) to signal an active recording.
+///
+/// Replaces `.symbolEffect(.variableColor.iterative)`, which — like any
+/// continuous SwiftUI animation inside the NavigationSplitView — drove a
+/// per-frame view-graph + AppKit constraint-layout pass costing ~38% CPU.
+/// Here the pulse is a `CABasicAnimation` on the hosting layer's opacity: it is
+/// handed to the Core Animation render server once and then composites on the
+/// GPU with zero per-frame work in the app. The animation is installed in
+/// `viewDidMoveToWindow` so it isn't dropped before the layer joins the render
+/// tree (adding it earlier silently does nothing).
+private struct BreathingSymbol: NSViewRepresentable {
+    let systemName: String
+    let pointSize: CGFloat
+    let color: NSColor
+
+    func makeNSView(context: Context) -> BreathingSymbolView {
+        let v = BreathingSymbolView()
+        v.configure(systemName: systemName, pointSize: pointSize, color: color)
+        return v
+    }
+
+    func updateNSView(_ nsView: BreathingSymbolView, context: Context) {}
+}
+
+private final class BreathingSymbolView: NSView {
+    private let imageView = NSImageView()
+
+    func configure(systemName: String, pointSize: CGFloat, color: NSColor) {
+        wantsLayer = true
+        let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+        let image = NSImage(systemSymbolName: systemName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        imageView.image = image
+        imageView.contentTintColor = color
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            imageView.widthAnchor.constraint(equalTo: widthAnchor),
+            imageView.heightAnchor.constraint(equalTo: heightAnchor),
+        ])
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, let layer = imageView.layer else { return }
+        layer.removeAnimation(forKey: "breathe")
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 1.0
+        breathe.toValue = 0.35
+        breathe.duration = 0.9
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        breathe.isRemovedOnCompletion = false
+        layer.add(breathe, forKey: "breathe")
     }
 }
