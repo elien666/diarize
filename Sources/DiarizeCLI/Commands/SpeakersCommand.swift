@@ -166,7 +166,7 @@ struct SpeakersCommand: AsyncParsableCommand {
             print("Current threshold: \(config.similarityThreshold)")
             print("")
             print("Similarity to other speakers (centroid cosine):")
-            print(String(format: "%-44s  %-20s  %s", "ID", "Label", "Sim"))
+            print(TableRow.format(["ID", "Label", "Sim"], widths: [44, 20, 0]))
             var rows: [(String, String, Float)] = []
             for s in speakers where s.id != target.id {
                 let embs = try store.embeddings(for: s.id).map { $0.asFloats }
@@ -176,7 +176,7 @@ struct SpeakersCommand: AsyncParsableCommand {
             }
             for (id, label, sim) in rows.sorted(by: { $0.2 > $1.2 }) {
                 let marker = sim >= config.similarityThreshold ? "  ← match" : ""
-                print(String(format: "%-44s  %-20s  %.3f%@", id, label, sim, marker))
+                print(TableRow.format([id, label, String(format: "%.3f", sim) + marker], widths: [44, 20, 0]))
             }
             print("")
             print("Tip: two speakers who are the same person should score ≥ \(config.similarityThreshold).")
