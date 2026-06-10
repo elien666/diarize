@@ -166,11 +166,20 @@ private struct FolderRow: View {
                 Text(folder.name)
                     .font(.body)
                     .lineLimit(1)
-                    .simultaneousGesture(
-                        TapGesture(count: 2).onEnded { beginRename() }
-                    )
+                Spacer(minLength: 4)
+                Button {
+                    library.createFolder(name: "New Folder", parentId: folder.id)
+                    isExpanded = true
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("New Subfolder")
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func beginRename() {
@@ -207,9 +216,7 @@ struct RecordingRow: View {
             rowContent
         }
         .contextMenu { contextMenuItems }
-        .onDrag {
-            NSItemProvider(object: recording.id as NSString)
-        }
+        .draggable(recording.id)
     }
 
     @ViewBuilder
@@ -228,9 +235,6 @@ struct RecordingRow: View {
                     Text(recording.title ?? "Recording")
                         .font(.body)
                         .lineLimit(1)
-                        .simultaneousGesture(
-                            TapGesture(count: 2).onEnded { beginRename() }
-                        )
                 }
             }
             if !isRenaming {
@@ -245,6 +249,8 @@ struct RecordingRow: View {
                 .foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -261,10 +267,11 @@ struct RecordingRow: View {
                     library.moveRecording(recording.id, toFolder: nil)
                 }
                 Divider()
-                ForEach(library.folders, id: \.id) { folder in
-                    Button(folder.name) {
-                        library.moveRecording(recording.id, toFolder: folder.id)
-                    }
+                let roots = library.folders
+                    .filter { $0.parentId == nil }
+                    .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+                ForEach(roots, id: \.id) { folder in
+                    MoveToFolderMenu(folder: folder, recordingId: recording.id)
                 }
             }
         }
@@ -319,6 +326,36 @@ struct RecordingRow: View {
         let m = (total % 3600) / 60
         let s = total % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+}
+
+// MARK: - MoveToFolderMenu
+
+/// Recursive submenu for the "Move to Folder" context action so nested folders
+/// keep their hierarchy. Each level offers "Move here" plus a submenu per child.
+private struct MoveToFolderMenu: View {
+    let folder: RecordingFolder
+    let recordingId: String
+    @EnvironmentObject var library: LibraryViewModel
+
+    private var children: [RecordingFolder] {
+        library.folders
+            .filter { $0.parentId == folder.id }
+            .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+    }
+
+    var body: some View {
+        Menu(folder.name) {
+            Button("Move here") {
+                library.moveRecording(recordingId, toFolder: folder.id)
+            }
+            if !children.isEmpty {
+                Divider()
+                ForEach(children, id: \.id) { child in
+                    MoveToFolderMenu(folder: child, recordingId: recordingId)
+                }
+            }
+        }
     }
 }
 
