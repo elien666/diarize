@@ -125,6 +125,11 @@ final class LibraryViewModel: ObservableObject {
     /// and re-render the whole window every second.
     @Published private(set) var recordingStartedAt: Date?
     @Published var recordingSourcesLabel: String = ""
+    /// The live recorder's level meter + per-source device names, published once
+    /// per recording (set on start, cleared on stop). The UI polls the meter via
+    /// a TimelineView so the ticking level display does NOT republish through this
+    /// model — same isolation as `recordingStartedAt`.
+    @Published private(set) var recordingMeter: RecordingMeterHandle?
     private var activeRecorder: AudioRecorder?
     private var recordingOutputURL: URL?
 
@@ -133,7 +138,8 @@ final class LibraryViewModel: ObservableObject {
     func startRecording(
         sources: Set<AudioRecorder.Source>,
         title: String = "",
-        language: AppConfig.Language? = nil
+        language: AppConfig.Language? = nil,
+        micDeviceUID: String? = nil
     ) {
         guard !isRecording else { return }
         let f = DateFormatter()
@@ -144,7 +150,7 @@ final class LibraryViewModel: ObservableObject {
 
         let recorder: AudioRecorder
         do {
-            recorder = try AudioRecorder(config: AudioRecorder.Config(sources: sources, outputURL: outputURL))
+            recorder = try AudioRecorder(config: AudioRecorder.Config(sources: sources, outputURL: outputURL, micDeviceUID: micDeviceUID))
         } catch {
             presentError(
                 title: "Recording could not be started",
@@ -186,6 +192,7 @@ final class LibraryViewModel: ObservableObject {
 
         self.activeRecorder = recorder
         self.recordingOutputURL = outputURL
+        self.recordingMeter = RecordingMeterHandle(recorder: recorder, requestedSources: sources)
         self.recordingSourcesLabel = sources.map { $0.rawValue }.sorted().joined(separator: "+")
         self.statusMessage = "Recording (\(recordingSourcesLabel)) …"
         self.activeRecordingId = recordingId
@@ -347,6 +354,7 @@ final class LibraryViewModel: ObservableObject {
         recordingOutputURL = nil
         recordingStartedAt = nil
         recordingSourcesLabel = ""
+        recordingMeter = nil
         activeRecordingId = nil
     }
 

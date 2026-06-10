@@ -21,6 +21,8 @@ final class ProcessAudioTap: @unchecked Sendable {
 
     private let onSamples: ([Float]) -> Void
     private let queue = DispatchQueue(label: "diarize.processaudiotap")
+    private var configChangeObserver: NSObjectProtocol?
+    private var isStopping = false
 
     init(targetFormat: AVAudioFormat, onSamples: @escaping ([Float]) -> Void) {
         self.targetFormat = targetFormat
@@ -63,9 +65,40 @@ final class ProcessAudioTap: @unchecked Sendable {
         aggregateDeviceID = newAggregateID
 
         try startEngine(deviceID: aggregateDeviceID)
+
+        // An output-device switch in System Settings posts a configuration-change
+        // notification that tears down the installed tap. The global process tap +
+        // aggregate device survive (they're not bound to the default output), so we
+        // only need to re-point the engine at the aggregate and re-install the tap.
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self, !self.isStopping else { return }
+            // Hop off the notification thread and let CoreAudio settle before
+            // rebuilding the engine against the aggregate device.
+            self.queue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                guard let self, !self.isStopping else { return }
+                self.engine.inputNode.removeTap(onBus: 0)
+                if self.engine.isRunning { self.engine.stop() }
+                self.engine.reset()
+                do {
+                    try self.startEngine(deviceID: self.aggregateDeviceID)
+                    NSLog("[diarize] System-audio configuration changed — re-installed process tap")
+                } catch {
+                    NSLog("[diarize] System-audio configuration change recovery failed: \(error.localizedDescription)")
+                }
+            }
+        }
     }
 
     func stop() {
+        isStopping = true
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configChangeObserver = nil
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
 

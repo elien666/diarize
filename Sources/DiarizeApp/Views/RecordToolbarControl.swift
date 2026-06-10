@@ -6,6 +6,9 @@ struct RecordToolbarControl: View {
     @State private var showPopover = false
     @State private var pendingTitle = ""
     @State private var selectedLanguage: AppConfig.Language = .auto
+    /// Persisted UID of the chosen mic. Empty string = follow the system default.
+    @AppStorage("selectedMicDeviceUID") private var selectedMicUID = ""
+    @State private var inputDevices: [AudioInputDevice] = []
 
     var body: some View {
         Button {
@@ -20,6 +23,14 @@ struct RecordToolbarControl: View {
         .disabled(library.importInProgress || library.isRecording)
         .popover(isPresented: $showPopover, arrowEdge: .bottom) {
             recordPopover
+                .onAppear {
+                    inputDevices = AudioInputDevices.all()
+                    // Drop a stale selection (e.g. an unplugged USB mic) so the
+                    // picker doesn't show a blank row.
+                    if !selectedMicUID.isEmpty, !inputDevices.contains(where: { $0.uid == selectedMicUID }) {
+                        selectedMicUID = ""
+                    }
+                }
         }
     }
 
@@ -36,6 +47,14 @@ struct RecordToolbarControl: View {
             }
             .pickerStyle(.segmented)
 
+            Picker("Microphone", selection: $selectedMicUID) {
+                Text("System Default").tag("")
+                ForEach(inputDevices) { device in
+                    Text(device.name).tag(device.uid)
+                }
+            }
+            .frame(minWidth: 240)
+
             Divider()
 
             VStack(spacing: 4) {
@@ -50,7 +69,12 @@ struct RecordToolbarControl: View {
     private func sourceButton(label: String, icon: String, sources: Set<AudioRecorder.Source>) -> some View {
         Button {
             showPopover = false
-            library.startRecording(sources: sources, title: pendingTitle, language: selectedLanguage)
+            library.startRecording(
+                sources: sources,
+                title: pendingTitle,
+                language: selectedLanguage,
+                micDeviceUID: sources.contains(.mic) && !selectedMicUID.isEmpty ? selectedMicUID : nil
+            )
             pendingTitle = ""
         } label: {
             Label(label, systemImage: icon)

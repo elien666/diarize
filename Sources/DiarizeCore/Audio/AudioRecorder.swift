@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import CoreAudio
 import Foundation
 import ScreenCaptureKit
 
@@ -14,9 +15,13 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     public struct Config: Sendable {
         public let sources: Set<Source>
         public let outputURL: URL
-        public init(sources: Set<Source>, outputURL: URL) {
+        /// UID of the input device to capture the mic from. When nil, the system
+        /// default input is used. Ignored unless `.mic` is in `sources`.
+        public let micDeviceUID: String?
+        public init(sources: Set<Source>, outputURL: URL, micDeviceUID: String? = nil) {
             self.sources = sources
             self.outputURL = outputURL
+            self.micDeviceUID = micDeviceUID
         }
     }
 
@@ -36,6 +41,13 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     }
 
     public let config: Config
+    /// Live per-source level meter for the recording UI. Fed from the audio
+    /// callbacks; polled by the view layer.
+    public let meter = AudioLevelMeter()
+    /// Human-readable name of the device each active source is capturing from,
+    /// populated as each source starts (e.g. the default input's name for mic,
+    /// the system-audio capture method for system). Read on the main thread.
+    public private(set) var deviceNames: [Source: String] = [:]
     private let writer: WAVWriter
     private let mixer: AudioMixer
     private let engine = AVAudioEngine()
@@ -46,6 +58,13 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     private var systemStream: SCStream?
     private var systemOutput: SystemAudioOutput?
     private var processTapBox: AnyObject?
+    private var configChangeObserver: NSObjectProtocol?
+    /// Serializes mic engine recovery so overlapping configuration-change
+    /// notifications (macOS often posts several in a burst) can't race.
+    private let micRecoveryQueue = DispatchQueue(label: "diarize.recorder.micrecovery")
+    /// Set while stopping so a late configuration-change notification doesn't try
+    /// to restart an engine we're tearing down.
+    private var isStopping = false
 
     public init(config: Config) throws {
         guard !config.sources.isEmpty else { throw RecorderError.noSourcesSelected }
@@ -92,6 +111,11 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     }
 
     public func stop() async throws {
+        isStopping = true
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configChangeObserver = nil
+        }
         if config.sources.contains(.mic) {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -113,7 +137,52 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
     // MARK: - Mic
 
     private func startMic() throws {
+        try installMicTapAndStart()
+        deviceNames[.mic] = currentMicDeviceName()
+
+        // Switching the input device in System Settings (or unplugging a USB mic)
+        // posts a configuration-change notification and silently tears down the
+        // installed tap — the engine keeps "running" but delivers no more buffers,
+        // so the recording appears to die. Re-install the tap against the new
+        // input format and restart on every such change.
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: nil
+        ) { [weak self] _ in
+            self?.handleMicConfigurationChange()
+        }
+    }
+
+    /// (Re)install the mic tap against the current input format and start the
+    /// engine. Safe to call repeatedly. On a configuration change the engine must
+    /// be fully torn down (stop + reset) before the tap can be re-installed against
+    /// the new hardware format — just removing/re-adding the tap leaves a stale
+    /// I/O unit that delivers no buffers (the "stuck on waiting" symptom).
+    private func installMicTapAndStart() throws {
         let input = engine.inputNode
+        input.removeTap(onBus: 0)
+        if engine.isRunning { engine.stop() }
+        // reset() drops the cached graph state so inputNode re-queries the now-current
+        // default input device and its real format.
+        engine.reset()
+
+        // Point the engine's I/O unit at the chosen device. With no selection (or an
+        // unplugged one) we fall through to the system default input.
+        if let uid = config.micDeviceUID, let device = AudioInputDevices.device(forUID: uid) {
+            var deviceIDVar = device.deviceID
+            if let unit = input.audioUnit {
+                AudioUnitSetProperty(
+                    unit,
+                    kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global,
+                    0,
+                    &deviceIDVar,
+                    UInt32(MemoryLayout<AudioObjectID>.size)
+                )
+            }
+        }
+
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0 else {
             throw RecorderError.audioEngineFailedToStart("Microphone is not providing a valid sample rate (permission granted?)")
@@ -123,6 +192,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             guard let self else { return }
             let samples = self.resample(buffer: buffer, inputFormat: inputFormat, converter: &self.micConverter)
             self.samplesReceived[.mic, default: 0] += samples.count
+            self.meter.feed(samples, channel: .mic)
             self.mixer.append(samples, channel: .mic)
         }
 
@@ -130,6 +200,38 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             try engine.start()
         } catch {
             throw RecorderError.audioEngineFailedToStart(error.localizedDescription)
+        }
+    }
+
+    /// Name to show for the mic source: the explicitly chosen device when one is
+    /// selected (and present), otherwise the current system default input.
+    private func currentMicDeviceName() -> String {
+        if let uid = config.micDeviceUID, let device = AudioInputDevices.device(forUID: uid) {
+            return device.name
+        }
+        return Self.defaultInputDeviceName() ?? "Microphone"
+    }
+
+    private func handleMicConfigurationChange() {
+        guard !isStopping else { return }
+        // Hop off the notification thread and give CoreAudio a beat to settle on the
+        // new device before we re-query its format — querying too early can return a
+        // zero/stale sample rate and the recovery silently no-ops.
+        micRecoveryQueue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, !self.isStopping else { return }
+            do {
+                try self.installMicTapAndStart()
+                self.deviceNames[.mic] = self.currentMicDeviceName()
+                NSLog("[diarize] Mic configuration changed — re-installed tap on \(self.deviceNames[.mic] ?? "?")")
+            } catch {
+                NSLog("[diarize] Mic configuration change recovery failed: \(error.localizedDescription) — retrying")
+                // One delayed retry in case the device wasn't ready yet.
+                self.micRecoveryQueue.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                    guard let self, !self.isStopping else { return }
+                    try? self.installMicTapAndStart()
+                    self.deviceNames[.mic] = self.currentMicDeviceName()
+                }
+            }
         }
     }
 
@@ -155,6 +257,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         let tap = ProcessAudioTap(targetFormat: targetFormat) { [weak self] samples in
             guard let self else { return }
             self.samplesReceived[.system, default: 0] += samples.count
+            self.meter.feed(samples, channel: .system)
             self.mixer.append(samples, channel: .system)
         }
         do {
@@ -162,6 +265,7 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         } catch {
             throw RecorderError.systemAudioUnavailable(error.localizedDescription)
         }
+        self.deviceNames[.system] = "System Audio (all apps)"
         self.processTapBox = tap
     }
 
@@ -186,10 +290,12 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
                 guard let self, let pcm = self.pcmBuffer(from: sampleBuffer) else { return }
                 let samples = self.resample(buffer: pcm, inputFormat: pcm.format, converter: &self.systemConverter)
                 self.samplesReceived[.system, default: 0] += samples.count
+                self.meter.feed(samples, channel: .system)
                 self.mixer.append(samples, channel: .system)
             }
             try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: DispatchQueue(label: "diarize.recorder.system"))
             try await stream.startCapture()
+            self.deviceNames[.system] = "System Audio (default output)"
             self.systemStream = stream
             self.systemOutput = output
         } catch let err as RecorderError {
@@ -235,6 +341,38 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             }
         }
         return buffer
+    }
+
+    // MARK: - Device naming
+
+    /// Name of the current default input device (the one the mic tap reads from),
+    /// via CoreAudio. Returns nil if it can't be resolved.
+    private static func defaultInputDeviceName() -> String? {
+        var deviceID = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &deviceID) == noErr,
+              deviceID != kAudioObjectUnknown else {
+            return nil
+        }
+
+        var nameAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var name: Unmanaged<CFString>?
+        var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(deviceID, &nameAddr, 0, nil, &nameSize, &name) == noErr,
+              let cfName = name?.takeRetainedValue() else {
+            return nil
+        }
+        let result = cfName as String
+        return result.isEmpty ? nil : result
     }
 
     // MARK: - Format conversion

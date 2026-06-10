@@ -166,33 +166,39 @@ struct RecordingDetailView: View {
     }
 
     private var liveRecordingBar: some View {
-        HStack(spacing: 12) {
-            RecordingPulse()
-            // Drive the elapsed display with a TimelineView so only this text ticks —
-            // not the whole window. (Publishing the elapsed seconds through the shared
-            // view model re-rendered the entire NavigationSplitView every second.)
-            TimelineView(.periodic(from: library.recordingStartedAt ?? .now, by: 1)) { context in
-                let elapsed = (library.recordingStartedAt).map { context.date.timeIntervalSince($0) } ?? 0
-                Text(formatDuration(max(0, elapsed)))
-                    .monospacedDigit()
-                    .font(.title3.weight(.medium))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                RecordingPulse()
+                // Drive the elapsed display with a TimelineView so only this text ticks —
+                // not the whole window. (Publishing the elapsed seconds through the shared
+                // view model re-rendered the entire NavigationSplitView every second.)
+                TimelineView(.periodic(from: library.recordingStartedAt ?? .now, by: 1)) { context in
+                    let elapsed = (library.recordingStartedAt).map { context.date.timeIntervalSince($0) } ?? 0
+                    Text(formatDuration(max(0, elapsed)))
+                        .monospacedDigit()
+                        .font(.title3.weight(.medium))
+                }
+                Text(library.recordingSourcesLabel)
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Spacer()
+                Button(role: .destructive) {
+                    library.cancelRecording()
+                } label: {
+                    Label("Discard", systemImage: "trash")
+                }
+                Button {
+                    library.stopRecordingAndTranscribe()
+                } label: {
+                    Label("Stop & Analyze", systemImage: "stop.circle.fill")
+                        .foregroundStyle(.red)
+                }
+                .keyboardShortcut("s", modifiers: .command)
             }
-            Text(library.recordingSourcesLabel)
-                .foregroundStyle(.secondary)
-                .font(.caption)
-            Spacer()
-            Button(role: .destructive) {
-                library.cancelRecording()
-            } label: {
-                Label("Discard", systemImage: "trash")
+            // Per-device live level meters. Isolated TimelineView — see RecordingLevels.
+            if let meter = library.recordingMeter {
+                RecordingLevels(meter: meter)
             }
-            Button {
-                library.stopRecordingAndTranscribe()
-            } label: {
-                Label("Stop & Analyze", systemImage: "stop.circle.fill")
-                    .foregroundStyle(.red)
-            }
-            .keyboardShortcut("s", modifiers: .command)
         }
         .padding(.horizontal)
         .padding(.vertical, 12)
