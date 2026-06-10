@@ -16,27 +16,26 @@ private let recordingUTI = "public.plain-text"
 
 struct SidebarView: View {
     @EnvironmentObject var library: LibraryViewModel
+    @State private var recordingsExpanded: Bool = true
+    @State private var speakersExpanded: Bool = true
 
     var body: some View {
         List(selection: bindingForSelection()) {
-            Section {
+            Section(isExpanded: $recordingsExpanded) {
                 RecordingTreeView()
             } header: {
-                HStack {
-                    Label("Recordings", systemImage: "waveform")
-                    Spacer()
-                    Button {
-                        library.createFolder(name: "New Folder")
-                    } label: {
-                        Image(systemName: "folder.badge.plus")
+                Label("Recordings", systemImage: "waveform")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { withAnimation { recordingsExpanded.toggle() } }
+                    .contextMenu {
+                        Button("New Folder") {
+                            library.createFolder(name: "New Folder")
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help("New Folder")
-                    .padding(.trailing, 8)
-                }
             }
 
-            Section {
+            Section(isExpanded: $speakersExpanded) {
                 ForEach(library.speakers, id: \.id) { sp in
                     NavigationLink(value: SidebarItem.speaker(sp.id)) {
                         SpeakerRow(speaker: sp)
@@ -44,6 +43,9 @@ struct SidebarView: View {
                 }
             } header: {
                 Label("Speakers", systemImage: "person.2")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { withAnimation { speakersExpanded.toggle() } }
             }
         }
         .listStyle(.sidebar)
@@ -102,7 +104,7 @@ private struct RecordingTreeView: View {
 private struct FolderRow: View {
     let folder: RecordingFolder
     @EnvironmentObject var library: LibraryViewModel
-    @State private var isExpanded: Bool = true
+    @State private var isExpanded: Bool = false
     @State private var isRenaming: Bool = false
     @State private var renameDraft: String = ""
     @State private var isDropTarget: Bool = false
@@ -133,19 +135,6 @@ private struct FolderRow: View {
             delegate: RecordingDropDelegate(targetFolderId: folder.id, library: library, isTargeted: $isDropTarget)
         )
         .listRowBackground(isDropTarget ? Color.accentColor.opacity(0.12) : Color.clear)
-        .contextMenu {
-            Button("Rename Folder") { beginRename() }
-            Button("New Subfolder") {
-                library.createFolder(name: "New Folder", parentId: folder.id)
-                isExpanded = true
-            }
-            Divider()
-            Button(role: .destructive) {
-                library.deleteFolder(folder.id)
-            } label: {
-                Label("Delete Folder", systemImage: "trash")
-            }
-        }
     }
 
     @ViewBuilder
@@ -166,20 +155,23 @@ private struct FolderRow: View {
                 Text(folder.name)
                     .font(.body)
                     .lineLimit(1)
-                Spacer(minLength: 4)
-                Button {
-                    library.createFolder(name: "New Folder", parentId: folder.id)
-                    isExpanded = true
-                } label: {
-                    Image(systemName: "folder.badge.plus")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("New Subfolder")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+        .contextMenu {
+            Button("Rename Folder") { beginRename() }
+            Button("New Subfolder") {
+                library.createFolder(name: "New Folder", parentId: folder.id)
+                isExpanded = true
+            }
+            Divider()
+            Button(role: .destructive) {
+                library.deleteFolder(folder.id)
+            } label: {
+                Label("Delete Folder", systemImage: "trash")
+            }
+        }
     }
 
     private func beginRename() {
