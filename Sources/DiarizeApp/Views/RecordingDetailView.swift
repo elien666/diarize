@@ -106,24 +106,42 @@ struct RecordingDetailView: View {
                 }
                 Spacer()
                 if recording.processingState == .done {
-                    Button("Open Markdown") {
+                    Button {
                         NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
+                    } label: {
+                        Image(systemName: "doc.text")
                     }
                     .controlSize(.small)
-                    Button("Show in Finder") {
+                    .help("Open")
+                    Button {
                         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording.transcriptMd)])
+                    } label: {
+                        Image(systemName: "folder")
                     }
                     .controlSize(.small)
-                    Button("Re-analyze") {
+                    .help("Reveal in Finder")
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(recording.transcriptMd, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.clipboard")
+                    }
+                    .controlSize(.small)
+                    .help("Copy Path")
+                    Button {
                         library.retryAnalysis(recordingId: recording.id)
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
                     }
                     .controlSize(.small)
+                    .help("Re-analyze")
                     Button(role: .destructive) {
                         pendingDelete = true
                     } label: {
-                        Label("Delete", systemImage: "trash")
+                        Image(systemName: "trash")
                     }
                     .controlSize(.small)
+                    .help("Delete")
                 }
             }
             .font(.caption)
