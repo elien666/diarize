@@ -10,27 +10,50 @@ struct RecordToolbarControl: View {
     @AppStorage("selectedMicDeviceUID") private var selectedMicUID = ""
     @State private var inputDevices: [AudioInputDevice] = []
 
+    private var recordingDisabled: Bool {
+        library.importInProgress || library.isRecording
+    }
+
     var body: some View {
-        Button {
-            showPopover = true
-        } label: {
-            Label("Start Recording", systemImage: "record.circle")
-                .foregroundStyle(library.isRecording ? Color.secondary : Color.red)
-        }
-        .help(library.isRecording
-              ? "A recording is already in progress"
-              : "Start a live recording")
-        .disabled(library.importInProgress || library.isRecording)
-        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
-            recordPopover
-                .onAppear {
-                    inputDevices = AudioInputDevices.all()
-                    // Drop a stale selection (e.g. an unplugged USB mic) so the
-                    // picker doesn't show a blank row.
-                    if !selectedMicUID.isEmpty, !inputDevices.contains(where: { $0.uid == selectedMicUID }) {
-                        selectedMicUID = ""
+        HStack(spacing: 1) {
+            // Quick record: start mic + system audio immediately, no menu.
+            Button {
+                library.startRecording(
+                    sources: [.mic, .system],
+                    title: "",
+                    language: selectedLanguage,
+                    micDeviceUID: selectedMicUID.isEmpty ? nil : selectedMicUID
+                )
+            } label: {
+                Label("Start Recording", systemImage: "record.circle")
+                    .foregroundStyle(library.isRecording ? Color.secondary : Color.red)
+            }
+            .help(library.isRecording
+                  ? "A recording is already in progress"
+                  : "Start a live recording (microphone + system audio)")
+            .disabled(recordingDisabled)
+
+            // Caret: open the recording options menu.
+            Button {
+                showPopover = true
+            } label: {
+                Image(systemName: "chevron.down")
+                    .imageScale(.small)
+                    .foregroundStyle(library.isRecording ? Color.secondary : Color.primary)
+            }
+            .help("Recording options")
+            .disabled(recordingDisabled)
+            .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+                recordPopover
+                    .onAppear {
+                        inputDevices = AudioInputDevices.all()
+                        // Drop a stale selection (e.g. an unplugged USB mic) so the
+                        // picker doesn't show a blank row.
+                        if !selectedMicUID.isEmpty, !inputDevices.contains(where: { $0.uid == selectedMicUID }) {
+                            selectedMicUID = ""
+                        }
                     }
-                }
+            }
         }
     }
 
