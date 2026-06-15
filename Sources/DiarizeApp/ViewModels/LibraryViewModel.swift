@@ -373,6 +373,18 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
+    /// Permanently delete a recording and all of its files (WAV + transcripts),
+    /// not just the database row. Used by the auto-mode session list's "Delete"
+    /// action to discard an unwanted automatic capture.
+    func deleteRecordingAndFiles(_ recordingId: String) {
+        if let r = try? store.recording(id: recordingId) {
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: r.sourcePath))
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: r.transcriptMd))
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: r.transcriptJson))
+        }
+        deleteRecording(recordingId)
+    }
+
     /// Reassign a segment to a different (or new) speaker. When `speakerId` is nil,
     /// a brand new speaker is created.
     func setSegmentSpeaker(segmentId: Int64, to speakerId: String?) {

@@ -3,10 +3,23 @@ import DiarizeCore
 
 struct RootView: View {
     @EnvironmentObject var library: LibraryViewModel
+    @EnvironmentObject var permissions: PermissionsManager
+    @EnvironmentObject var autoMode: AutoModeController
     @State private var searchQuery: String = ""
     @State private var showingSearch = false
 
     var body: some View {
+        Group {
+            if autoMode.isActive {
+                AutoModeView()
+            } else {
+                libraryView
+            }
+        }
+        .onAppear { autoMode.attach(library: library, permissions: permissions) }
+    }
+
+    private var libraryView: some View {
         VStack(spacing: 0) {
             NavigationSplitView {
                 SidebarView()
@@ -30,6 +43,17 @@ struct RootView: View {
                 }
                 ToolbarItem(placement: .navigation) {
                     RecordToolbarControl()
+                }
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        autoMode.enter()
+                    } label: {
+                        Label("Auto Recording Mode", systemImage: "wand.and.stars")
+                    }
+                    .disabled(!permissions.allGranted)
+                    .help(permissions.allGranted
+                        ? "Automatically record when a call is detected"
+                        : "Grant Microphone and Screen Recording permissions first")
                 }
             }
             .onChange(of: searchQuery) { _, new in

@@ -6,6 +6,7 @@ import DiarizeCore
 struct DiarizeAppMain: App {
     @StateObject private var library = LibraryViewModel()
     @StateObject private var permissions = PermissionsManager()
+    @StateObject private var autoMode = AutoModeController()
     // Stored as a property so ARC keeps it alive for the lifetime of the app.
     @State private var statusBar: StatusBarController?
 
@@ -21,6 +22,7 @@ struct DiarizeAppMain: App {
             RootView()
                 .environmentObject(library)
                 .environmentObject(permissions)
+                .environmentObject(autoMode)
                 .frame(minWidth: 1000, minHeight: 600)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     // Re-check after the user returns from System Settings.
@@ -40,6 +42,13 @@ struct DiarizeAppMain: App {
                     .keyboardShortcut("o")
                 Button("Reload Library") { library.reload() }
                     .keyboardShortcut("r")
+            }
+            CommandGroup(after: .toolbar) {
+                Button(autoMode.isActive ? "Exit Auto Recording Mode" : "Auto Recording Mode") {
+                    autoMode.isActive ? autoMode.exit() : autoMode.enter()
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .disabled(!autoMode.isActive && !permissions.allGranted)
             }
         }
 
