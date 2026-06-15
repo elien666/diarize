@@ -148,7 +148,20 @@ public final class TranscribePipeline {
             try await diarizer.prepareModels()
 
             progress.step("Running diarization …")
-            let diarization = try await diarizer.diarize(samples: audio.samples)
+            let diarization: DiarizationOutput
+            if audio.isStereoSplit {
+                // Stereo recording: diarize each channel separately to avoid echo
+                // confusion. Mic channel = local speaker(s), system channel = remote.
+                progress.step("Stereo split detected — diarizing channels separately …")
+                let micDiar = try await diarizer.diarize(samples: audio.micChannel!)
+                let sysDiar = try await diarizer.diarize(samples: audio.systemChannel!)
+                diarization = DiarizationOutput.merged(
+                    mic: micDiar, system: sysDiar,
+                    micPrefix: "local", systemPrefix: "remote"
+                )
+            } else {
+                diarization = try await diarizer.diarize(samples: audio.samples)
+            }
             progress.step("Diarized: \(diarization.segments.count) segments, \(diarization.speakerCentroids.count) local speakers")
 
             // No speech → mark empty and write an empty transcript.

@@ -28,6 +28,8 @@ public final class AudioMixer: @unchecked Sendable {
     private var heads: [Int] = [0, 0]
     private let compactThreshold = 16384
     private var enabledChannels: Set<Channel>
+    /// When true, write stereo interleaved (L=mic, R=system) instead of summing to mono.
+    private let stereo: Bool
     /// Wall-clock of last sample arrival per channel; used to detect that a channel
     /// is silent (e.g. system audio with nothing playing) so we don't stall.
     private var lastActivity: [Date] = [Date.distantPast, Date.distantPast]
@@ -35,9 +37,10 @@ public final class AudioMixer: @unchecked Sendable {
 
     private var tickTimer: DispatchSourceTimer?
 
-    public init(writer: WAVWriter, enabled: Set<Channel>) {
+    public init(writer: WAVWriter, enabled: Set<Channel>, stereo: Bool = false) {
         self.writer = writer
         self.enabledChannels = enabled
+        self.stereo = stereo
         // Periodic tick so we still flush even when one source is silent for long stretches.
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 0.1, repeating: 0.1)
@@ -114,26 +117,44 @@ public final class AudioMixer: @unchecked Sendable {
     }
 
     private func commitPrefix(length: Int) {
-        var mixed = [Float](repeating: 0, count: length)
-        for ch in enabledChannels {
-            let raw = ch.rawValue
-            let head = heads[raw]
-            let take = min(length, buffers[raw].count - head)
-            if take > 0 {
-                let buf = buffers[raw]
-                for i in 0..<take { mixed[i] += buf[head + i] }
-                heads[raw] = head + take
+        if stereo {
+            // Interleave: L=mic (ch 0), R=system (ch 1)
+            var interleaved = [Float](repeating: 0, count: length * 2)
+            for ch in enabledChannels {
+                let raw = ch.rawValue
+                let head = heads[raw]
+                let take = min(length, buffers[raw].count - head)
+                if take > 0 {
+                    let buf = buffers[raw]
+                    for i in 0..<take { interleaved[i * 2 + raw] = buf[head + i] }
+                    heads[raw] = head + take
+                }
+                if heads[raw] > compactThreshold {
+                    buffers[raw].removeFirst(heads[raw])
+                    heads[raw] = 0
+                }
             }
-            // Drop the committed prefix lazily so the head can't grow unbounded.
-            if heads[raw] > compactThreshold {
-                buffers[raw].removeFirst(heads[raw])
-                heads[raw] = 0
+            try? writer.append(samples: interleaved)
+        } else {
+            var mixed = [Float](repeating: 0, count: length)
+            for ch in enabledChannels {
+                let raw = ch.rawValue
+                let head = heads[raw]
+                let take = min(length, buffers[raw].count - head)
+                if take > 0 {
+                    let buf = buffers[raw]
+                    for i in 0..<take { mixed[i] += buf[head + i] }
+                    heads[raw] = head + take
+                }
+                if heads[raw] > compactThreshold {
+                    buffers[raw].removeFirst(heads[raw])
+                    heads[raw] = 0
+                }
             }
+            for i in 0..<mixed.count {
+                if mixed[i] > 1 { mixed[i] = 1 } else if mixed[i] < -1 { mixed[i] = -1 }
+            }
+            try? writer.append(samples: mixed)
         }
-        // Soft clip to [-1, 1]
-        for i in 0..<mixed.count {
-            if mixed[i] > 1 { mixed[i] = 1 } else if mixed[i] < -1 { mixed[i] = -1 }
-        }
-        try? writer.append(samples: mixed)
     }
 }

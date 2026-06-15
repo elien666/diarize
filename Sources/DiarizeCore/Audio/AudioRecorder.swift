@@ -75,15 +75,16 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             channels: 1,
             interleaved: false
         )!
+        let bothSources = config.sources.contains(.mic) && config.sources.contains(.system)
         do {
-            self.writer = try WAVWriter(url: config.outputURL, sampleRate: 16000, channels: 1)
+            self.writer = try WAVWriter(url: config.outputURL, sampleRate: 16000, channels: bothSources ? 2 : 1)
         } catch {
             throw RecorderError.writerFailedToOpen(error.localizedDescription)
         }
         var enabled: Set<AudioMixer.Channel> = []
         if config.sources.contains(.mic) { enabled.insert(.mic) }
         if config.sources.contains(.system) { enabled.insert(.system) }
-        self.mixer = AudioMixer(writer: writer, enabled: enabled)
+        self.mixer = AudioMixer(writer: writer, enabled: enabled, stereo: bothSources)
         super.init()
     }
 
@@ -163,8 +164,6 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         let input = engine.inputNode
         input.removeTap(onBus: 0)
         if engine.isRunning { engine.stop() }
-        // reset() drops the cached graph state so inputNode re-queries the now-current
-        // default input device and its real format.
         engine.reset()
 
         // Point the engine's I/O unit at the chosen device. With no selection (or an
@@ -180,18 +179,6 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
                     &deviceIDVar,
                     UInt32(MemoryLayout<AudioObjectID>.size)
                 )
-            }
-        }
-
-        // Enable Voice Processing (AEC) when recording both mic and system audio.
-        // This uses macOS's built-in echo cancellation to subtract the speaker
-        // playback from the mic signal, preventing remote voices from appearing
-        // twice in the mix (once clean from system audio, once as room echo on mic).
-        if config.sources.contains(.system) {
-            do {
-                try input.setVoiceProcessingEnabled(true)
-            } catch {
-                NSLog("[diarize] Voice Processing (AEC) could not be enabled: \(error.localizedDescription) — echo may leak into mic")
             }
         }
 
