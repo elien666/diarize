@@ -20,8 +20,8 @@ import Foundation
         )
 
         #expect(md.contains("# Test-Meeting"))
-        #expect(md.contains("**Sprache:** de"))
-        #expect(md.contains("**Sprecher:** Björn, Anna"))
+        #expect(md.contains("**Language:** de"))
+        #expect(md.contains("**Speakers:** Björn, Anna"))
         #expect(md.contains("**Björn:** Hallo zusammen."))
         #expect(md.contains("[00:00:04]") || md.contains("[00:00:03]"))   // rounding
     }
