@@ -183,6 +183,18 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
             }
         }
 
+        // Enable Voice Processing (AEC) when recording both mic and system audio.
+        // This uses macOS's built-in echo cancellation to subtract the speaker
+        // playback from the mic signal, preventing remote voices from appearing
+        // twice in the mix (once clean from system audio, once as room echo on mic).
+        if config.sources.contains(.system) {
+            do {
+                try input.setVoiceProcessingEnabled(true)
+            } catch {
+                NSLog("[diarize] Voice Processing (AEC) could not be enabled: \(error.localizedDescription) — echo may leak into mic")
+            }
+        }
+
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0 else {
             throw RecorderError.audioEngineFailedToStart("Microphone is not providing a valid sample rate (permission granted?)")
