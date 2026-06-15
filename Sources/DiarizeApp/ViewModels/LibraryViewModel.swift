@@ -385,6 +385,41 @@ final class LibraryViewModel: ObservableObject {
         deleteRecording(recordingId)
     }
 
+    // MARK: - GDPR: delete audio only, keep transcript
+
+    /// Remove only the raw audio (WAV) for a recording while keeping the transcript,
+    /// segments and speaker assignments. Used by the per-recording "Delete Audio"
+    /// action and by the auto-clean batch.
+    func deleteAudioOnly(_ recordingId: String) {
+        removeAudioFile(recordingId)
+        reload()
+    }
+
+    /// Same as `deleteAudioOnly` but without reloading after each item — the caller
+    /// reloads once after the batch to avoid N redundant reloads.
+    func deleteAudioForRecordings(_ ids: [String]) {
+        for id in ids { removeAudioFile(id) }
+        reload()
+    }
+
+    private func removeAudioFile(_ recordingId: String) {
+        guard let r = try? store.recording(id: recordingId), r.hasAudio else { return }
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: r.sourcePath))
+        try? store.markAudioDeleted(id: recordingId)
+    }
+
+    /// Recordings whose audio is older than `days`, still present on disk, and fully
+    /// processed — i.e. candidates for the auto-clean privacy prompt.
+    func audioCleanupCandidates(olderThanDays days: Int) -> [Recording] {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        return (try? store.allRecordings())?.filter {
+            $0.audioDeletedAt == nil
+                && $0.processingState == .done
+                && $0.createdAt < cutoff
+                && FileManager.default.fileExists(atPath: $0.sourcePath)
+        } ?? []
+    }
+
     /// Reassign a segment to a different (or new) speaker. When `speakerId` is nil,
     /// a brand new speaker is created.
     func setSegmentSpeaker(segmentId: Int64, to speakerId: String?) {

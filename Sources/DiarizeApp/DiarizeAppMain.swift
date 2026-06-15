@@ -7,6 +7,7 @@ struct DiarizeAppMain: App {
     @StateObject private var library = LibraryViewModel()
     @StateObject private var permissions = PermissionsManager()
     @StateObject private var autoMode = AutoModeController()
+    @StateObject private var cleanup = AudioCleanupController()
     // Stored as a property so ARC keeps it alive for the lifetime of the app.
     @State private var statusBar: StatusBarController?
 
@@ -23,6 +24,7 @@ struct DiarizeAppMain: App {
                 .environmentObject(library)
                 .environmentObject(permissions)
                 .environmentObject(autoMode)
+                .environmentObject(cleanup)
                 .frame(minWidth: 1000, minHeight: 600)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     // Re-check after the user returns from System Settings.

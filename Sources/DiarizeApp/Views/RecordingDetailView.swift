@@ -11,6 +11,7 @@ struct RecordingDetailView: View {
     @State private var renameDraft: String = ""
     @State private var pendingMerge: MergeRequest?
     @State private var pendingDelete = false
+    @State private var pendingAudioDelete = false
 
     struct MergeRequest: Identifiable {
         let id = UUID()
@@ -63,6 +64,18 @@ struct RecordingDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The transcript and all speaker assignments for this recording will be permanently deleted. This cannot be undone.")
+        }
+        .confirmationDialog(
+            "Delete audio for \"\(recording.title ?? "Recording")\"?",
+            isPresented: $pendingAudioDelete
+        ) {
+            Button("Delete Audio", role: .destructive) {
+                library.deleteAudioOnly(recording.id)
+                player.pause()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The audio file will be permanently deleted. The transcript and all speaker assignments will be kept. This cannot be undone.")
         }
         .confirmationDialog(
             "Merge speakers?",
@@ -135,6 +148,15 @@ struct RecordingDetailView: View {
                     }
                     .controlSize(.small)
                     .help("Re-analyze")
+                    if recording.hasAudio {
+                        Button {
+                            pendingAudioDelete = true
+                        } label: {
+                            Image(systemName: "waveform.slash")
+                        }
+                        .controlSize(.small)
+                        .help("Delete Audio (keep transcript)")
+                    }
                     Button(role: .destructive) {
                         pendingDelete = true
                     } label: {
@@ -158,9 +180,28 @@ struct RecordingDetailView: View {
             liveRecordingBar
         } else if recording.processingState == .analyzing {
             analyzingBar
+        } else if !recording.hasAudio {
+            audioDeletedBar
         } else {
             playerBar
         }
+    }
+
+    private var audioDeletedBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.shield")
+                .foregroundStyle(.secondary)
+            if let deletedAt = recording.audioDeletedAt {
+                Text("Audio deleted on \(deletedAt, format: .dateTime.year().month().day()) — transcript kept")
+            } else {
+                Text("Audio deleted — transcript kept")
+            }
+            Spacer()
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal)
+        .padding(.vertical, 12)
     }
 
     private var analyzingBar: some View {
@@ -448,6 +489,7 @@ struct RecordingDetailView: View {
     }
 
     private func loadAudioIfNeeded() {
+        guard recording.hasAudio else { return }
         let url = URL(fileURLWithPath: recording.sourcePath)
         if FileManager.default.fileExists(atPath: url.path) {
             player.load(url: url)

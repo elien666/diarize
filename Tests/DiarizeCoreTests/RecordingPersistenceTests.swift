@@ -61,6 +61,25 @@ import Foundation
         #expect(!segs.last!.text.isEmpty)
     }
 
+    @Test func markAudioDeletedSetsTimestampAndKeepsTranscript() throws {
+        let store = try makeStore()
+        let s = Speaker(label: "S"); try store.insertSpeaker(s)
+        let r = Recording(id: "rec_gdpr", title: nil, sourcePath: "/dev/null", durationSec: 10,
+                          language: "de", transcriptMd: "/tmp/m.md", transcriptJson: "/tmp/j.json")
+        let seg = RecordingSegment(recordingId: r.id, speakerId: s.id, startSec: 0, endSec: 5,
+                                   text: "Hallo", confidence: 0.9)
+        try store.insertRecording(r, segments: [seg])
+
+        #expect(try store.recording(id: "rec_gdpr")?.hasAudio == true)
+        try store.markAudioDeleted(id: "rec_gdpr")
+
+        let back = try store.recording(id: "rec_gdpr")
+        #expect(back?.audioDeletedAt != nil)
+        #expect(back?.hasAudio == false)
+        // Transcript + segments are untouched.
+        #expect(try store.segments(for: "rec_gdpr").count == 1)
+    }
+
     @Test func lookupByHashFindsRecording() throws {
         let store = try makeStore()
         let r = Recording(

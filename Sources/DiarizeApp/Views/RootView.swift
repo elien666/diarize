@@ -5,6 +5,7 @@ struct RootView: View {
     @EnvironmentObject var library: LibraryViewModel
     @EnvironmentObject var permissions: PermissionsManager
     @EnvironmentObject var autoMode: AutoModeController
+    @EnvironmentObject var cleanup: AudioCleanupController
     @State private var searchQuery: String = ""
     @State private var showingSearch = false
 
@@ -16,7 +17,17 @@ struct RootView: View {
                 libraryView
             }
         }
-        .onAppear { autoMode.attach(library: library, permissions: permissions) }
+        .onAppear {
+            autoMode.attach(library: library, permissions: permissions)
+            cleanup.attach(library: library)
+            cleanup.start()
+        }
+        .sheet(isPresented: Binding(
+            get: { !cleanup.pendingCleanup.isEmpty },
+            set: { if !$0 { cleanup.dismiss() } }
+        )) {
+            AudioCleanupSheet()
+        }
     }
 
     private var libraryView: some View {

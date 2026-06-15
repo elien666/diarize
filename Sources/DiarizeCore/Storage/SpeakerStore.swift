@@ -365,6 +365,18 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    /// GDPR: flag a recording's audio as deleted. The caller is responsible for
+    /// removing the WAV file itself; this only records that it was intentional, so
+    /// the player is hidden and auto-clean won't re-propose it.
+    public func markAudioDeleted(id: String, at date: Date = Date()) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE recordings SET audioDeletedAt = ? WHERE id = ?",
+                arguments: [date, id]
+            )
+        }
+    }
+
     public func setSourceHash(recordingId: String, hash: String) throws {
         try dbQueue.write { db in
             try db.execute(

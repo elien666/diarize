@@ -104,5 +104,15 @@ enum Migrations {
                 t.add(column: "folderId", .text).references("recording_folders", onDelete: .setNull)
             }
         }
+
+        migrator.registerMigration("v6_audio_deleted_at") { db in
+            // GDPR: the raw audio (biometric voice data) can be removed while keeping
+            // the derived transcript. Non-nil = audio was deliberately deleted; this
+            // distinguishes intentional deletion from a WAV that's missing for other
+            // reasons, and stops auto-clean from re-proposing the same recording.
+            try db.alter(table: "recordings") { t in
+                t.add(column: "audioDeletedAt", .datetime)
+            }
+        }
     }
 }

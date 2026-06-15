@@ -15,6 +15,11 @@ struct SettingsView: View {
     @State private var backfilling = false
     @State private var showRestartAlert = false
 
+    @AppStorage(AudioCleanupController.Defaults.autoCleanEnabled)
+    private var autoCleanEnabled = true
+    @AppStorage(AudioCleanupController.Defaults.audioRetentionDays)
+    private var audioRetentionDays = AudioCleanupController.Defaults.fallbackRetentionDays
+
     var body: some View {
         Form {
             Section("Recording") {
@@ -26,6 +31,16 @@ struct SettingsView: View {
                 .onChange(of: selectedLanguage) { _, lang in
                     library.updateDefaultLanguage(lang)
                 }
+            }
+
+            Section("Privacy") {
+                Toggle("Suggest deleting old audio automatically", isOn: $autoCleanEnabled)
+                Stepper("Keep audio for \(audioRetentionDays) day(s)",
+                        value: $audioRetentionDays, in: 1...365)
+                    .disabled(!autoCleanEnabled)
+                Text("Only the audio file is deleted — transcripts and speaker assignments are kept.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Speaker Matching") {
