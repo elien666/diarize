@@ -5,6 +5,7 @@ import DiarizeCore
 @main
 struct DiarizeAppMain: App {
     @StateObject private var library = LibraryViewModel()
+    @StateObject private var permissions = PermissionsManager()
     // Stored as a property so ARC keeps it alive for the lifetime of the app.
     @State private var statusBar: StatusBarController?
 
@@ -19,7 +20,12 @@ struct DiarizeAppMain: App {
         WindowGroup("diarize") {
             RootView()
                 .environmentObject(library)
+                .environmentObject(permissions)
                 .frame(minWidth: 1000, minHeight: 600)
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    // Re-check after the user returns from System Settings.
+                    permissions.refresh()
+                }
                 .withHostingWindow { window in
                     if statusBar == nil, let window {
                         statusBar = StatusBarController(library: library, window: window)

@@ -50,24 +50,29 @@ struct RootView: View {
 
 struct StatusBar: View {
     @EnvironmentObject var library: LibraryViewModel
+    @EnvironmentObject var permissions: PermissionsManager
 
     var body: some View {
         HStack(spacing: 8) {
-            if library.importInProgress {
-                if let progress = library.analysisProgress, let fraction = progress.fraction {
-                    ProgressView(value: fraction, total: 1.0)
-                        .progressViewStyle(.linear)
-                        .frame(width: 80)
-                        .controlSize(.small)
-                } else if library.importInProgress {
-                    ProgressView()
-                        .controlSize(.small)
+            if !permissions.allGranted {
+                permissionWarning
+            } else {
+                if library.importInProgress {
+                    if let progress = library.analysisProgress, let fraction = progress.fraction {
+                        ProgressView(value: fraction, total: 1.0)
+                            .progressViewStyle(.linear)
+                            .frame(width: 80)
+                            .controlSize(.small)
+                    } else if library.importInProgress {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                 }
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -75,6 +80,42 @@ struct StatusBar: View {
         .background(.bar)
         .overlay(alignment: .top) {
             Divider()
+        }
+    }
+
+    @ViewBuilder
+    private var permissionWarning: some View {
+        let missing = permissions.missing
+        Image(systemName: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
+        Text(missingLabel(missing))
+            .font(.caption)
+            .foregroundStyle(.red)
+            .lineLimit(1)
+        ForEach(missing) { permission in
+            Button {
+                permissions.request(permission)
+            } label: {
+                Text("Grant \(shortName(permission))")
+                    .font(.caption)
+            }
+            .controlSize(.small)
+            .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private func missingLabel(_ missing: [PermissionsManager.Permission]) -> String {
+        if missing.count == 1 {
+            return "\(missing[0].displayName) permission required"
+        }
+        return "Permissions required for recording"
+    }
+
+    private func shortName(_ permission: PermissionsManager.Permission) -> String {
+        switch permission {
+        case .microphone: return "Microphone"
+        case .screenRecording: return "Screen Recording"
         }
     }
 
