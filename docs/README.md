@@ -20,7 +20,8 @@ These pages explain what diarize does from *your* point of view: what each featu
 
 ## Power users
 
-- **[Command-Line Interface](cli.md)** — the scriptable `diarize` CLI: `transcribe`, `record`, `search`, `speakers`, `archive`, `config`.
+- **[Command-Line Interface](cli.md)** — the scriptable `diarize` CLI: `transcribe`, `record`, `search`, `speakers`, `archive`, `config`, `mcp`.
+- **[MCP Server](mcp.md)** — expose your library to local AI agents: read recordings and speakers, find unprocessed work, mark recordings processed, retry failed analyses, and manage titles and folders.
 
 ## How it works
 

@@ -20,9 +20,10 @@ Built on [FluidAudio](https://github.com/FluidInference/FluidAudio) (diarization
 - **Full-text search** — SQLite FTS5 across every transcript, with snippets and ranking. → [docs](docs/search.md)
 - **Folders & organization** — group recordings into nested folders with drag-and-drop and inline rename. → [docs](docs/organizing.md)
 - **Privacy-first** — fully on-device; delete raw audio while keeping transcripts (GDPR-friendly), with optional auto-clean of old audio and a menu-bar stealth mode. → [docs](docs/privacy.md)
+- **MCP server for agents** — expose the library to local AI agents over [Model Context Protocol](https://modelcontextprotocol.io): read recordings/speakers, find unprocessed work, mark recordings processed, retry failed analyses, and manage titles and folders — all on-device. → [docs](docs/mcp.md)
 - **Markdown + JSON output** — transcripts are written as readable Markdown and queryable JSON.
 - **Local archive** — recordings, transcripts, and the speaker database live under `~/Library/Application Support/diarize/` (configurable).
-- **Two front-ends** — a scriptable CLI (`diarize`) and a native SwiftUI app (`diarize-app`) backed by the same `DiarizeCore` library.
+- **Two front-ends + an agent interface** — a scriptable CLI (`diarize`) and a native SwiftUI app (`diarize-app`), plus an MCP server, all backed by the same `DiarizeCore` library.
 
 📖 **New here?** Start with the [User Guide](docs/README.md).
 
@@ -73,6 +74,9 @@ diarize archive reprocess <recording-id>
 # Show / change config
 diarize config show
 diarize config set default.language en
+
+# Serve the library to local AI agents (Model Context Protocol)
+diarize mcp
 ```
 
 All commands accept `--help` for full options. Full command reference: [docs/cli.md](docs/cli.md).
@@ -92,6 +96,7 @@ User-facing guides live in [`docs/`](docs/README.md):
 | [Privacy & Data](docs/privacy.md) | On-device processing, audio deletion, stealth mode |
 | [Settings](docs/settings.md) | Language, matching threshold, archive, maintenance |
 | [CLI Reference](docs/cli.md) | Every `diarize` command and option |
+| [MCP Server](docs/mcp.md) | Expose the library to local AI agents (tools, setup, safety) |
 
 ## Configuration
 
@@ -112,6 +117,7 @@ Sources/
     Pipeline/     Diarization, transcription, speaker matching, calibration
     Storage/      GRDB models, migrations, speaker store
     Render/       Markdown + JSON renderers
+    MCP/          Model Context Protocol server (tools, resources) for AI agents
   DiarizeCLI/     `diarize` executable (ArgumentParser)
   DiarizeApp/     `diarize-app` SwiftUI app (sidebar/folders, recording detail,
                   search, auto-recording mode, permissions, privacy cleanup, menu bar)

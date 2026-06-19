@@ -6,7 +6,7 @@ The `diarize` CLI exposes the same engine as the app, scriptably. Every command 
 diarize <command> [options]
 ```
 
-Commands: [`transcribe`](#transcribe) · [`record`](#record) · [`search`](#search) · [`speakers`](#speakers) · [`archive`](#archive) · [`config`](#config)
+Commands: [`transcribe`](#transcribe) · [`record`](#record) · [`search`](#search) · [`speakers`](#speakers) · [`archive`](#archive) · [`config`](#config) · [`mcp`](#mcp)
 
 ---
 
@@ -124,6 +124,27 @@ diarize config set default.language en
 | --- | --- |
 | `show` | Show the current configuration |
 | `set <key> <value>` | Set a value. Keys: `archive.path`, `default.language`, `similarity.threshold` |
+
+---
+
+## mcp
+
+Run a [Model Context Protocol](https://modelcontextprotocol.io) server (over stdio) that
+exposes your library to local AI agents. You normally register this command with an MCP
+client rather than running it by hand.
+
+```sh
+diarize mcp
+```
+
+| Option | Description |
+| --- | --- |
+| `--archive <path>` | Override the archive path |
+
+Agents can read recordings, speakers, folders and live recording status; find the latest
+or unprocessed recordings; mark them processed (bulk); read failed recordings' errors and
+retry analysis; and manage titles, folders and GDPR audio deletion. Full tool reference
+and setup: [MCP Server](mcp.md).
 
 ---
 
