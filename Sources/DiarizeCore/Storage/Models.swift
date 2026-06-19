@@ -87,11 +87,17 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
     /// Non-nil once the raw audio file has been deliberately deleted (GDPR), while
     /// the transcript and speaker data are kept. Nil means the audio still exists.
     public var audioDeletedAt: Date?
+    /// Non-nil once an agent has marked this recording as processed (MCP). Nil means
+    /// unprocessed. Exposed to agents as the boolean `processed`.
+    public var processedAt: Date?
 
     public static let databaseTableName = "recordings"
 
     /// Whether the raw audio is still on disk (i.e. not deleted for privacy).
     public var hasAudio: Bool { audioDeletedAt == nil }
+
+    /// Agent-facing boolean view of `processedAt`.
+    public var processed: Bool { processedAt != nil }
 
     public init(
         id: String = "rec_" + UUID().uuidString,
@@ -106,7 +112,8 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
         processingState: RecordingProcessingState = .done,
         errorMessage: String? = nil,
         folderId: String? = nil,
-        audioDeletedAt: Date? = nil
+        audioDeletedAt: Date? = nil,
+        processedAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -121,6 +128,7 @@ public struct Recording: Codable, FetchableRecord, MutablePersistableRecord, Sen
         self.errorMessage = errorMessage
         self.folderId = folderId
         self.audioDeletedAt = audioDeletedAt
+        self.processedAt = processedAt
     }
 }
 

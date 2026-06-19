@@ -80,7 +80,7 @@ public final class SearchService {
     /// Wrap each token in double-quotes so FTS5 doesn't choke on punctuation, and
     /// AND-join them. Bare tokens that already look like an FTS5 query (have ",
     /// AND/OR, NEAR, *) are passed through unchanged.
-    static func escapeForFts5(_ raw: String) -> String {
+    public static func escapeForFts5(_ raw: String) -> String {
         if raw.contains("\"") || raw.uppercased().contains(" AND ") || raw.uppercased().contains(" OR ") || raw.uppercased().contains("NEAR(") {
             return raw
         }

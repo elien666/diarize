@@ -114,5 +114,17 @@ enum Migrations {
                 t.add(column: "audioDeletedAt", .datetime)
             }
         }
+
+        migrator.registerMigration("v7_recording_processed_at") { db in
+            // Agent-facing "processed" flag for the MCP server. Stored as a nullable
+            // timestamp rather than a BOOL: NULL is the natural default for the entire
+            // existing backlog (no rewrite), the hot "find unprocessed" query is a cheap
+            // `processedAt IS NULL`, and we keep WHEN it was marked for free. Agents see
+            // it as a boolean: processed == (processedAt != nil).
+            try db.alter(table: "recordings") { t in
+                t.add(column: "processedAt", .datetime)
+            }
+            try db.create(index: "idx_rec_processed_at", on: "recordings", columns: ["processedAt"])
+        }
     }
 }

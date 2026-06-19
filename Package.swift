@@ -15,6 +15,7 @@ let package = Package(
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.14.5"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.7.0"),
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.10.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.1"),
     ],
     targets: [
         .executableTarget(
@@ -35,12 +36,16 @@ let package = Package(
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "MCP", package: "swift-sdk"),
             ],
             path: "Sources/DiarizeCore"
         ),
         .testTarget(
             name: "DiarizeCoreTests",
-            dependencies: ["DiarizeCore"],
+            dependencies: [
+                "DiarizeCore",
+                .product(name: "MCP", package: "swift-sdk"),
+            ],
             path: "Tests/DiarizeCoreTests"
         ),
     ]

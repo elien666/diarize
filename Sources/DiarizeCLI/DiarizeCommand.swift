@@ -13,6 +13,7 @@ struct DiarizeCommand: AsyncParsableCommand {
             SpeakersCommand.self,
             ArchiveCommand.self,
             ConfigCommand.self,
+            MCPCommand.self,
         ],
         defaultSubcommand: nil
     )

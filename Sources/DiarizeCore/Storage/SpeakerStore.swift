@@ -8,6 +8,15 @@ public final class SpeakerStore: @unchecked Sendable {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         var config = Configuration()
         config.foreignKeysEnabled = true
+        // WAL lets readers and the writer coexist across processes. The SwiftUI app and
+        // one-or-more spawned `diarize mcp` processes open this same file; in the default
+        // rollback-journal mode a writer would block all readers and yield SQLITE_BUSY.
+        // The busy timeout makes the loser of a writer-vs-writer race wait instead of
+        // failing immediately. (Sidecar -wal/-shm files appear next to the DB.)
+        config.busyMode = .timeout(5)
+        config.prepareDatabase { db in
+            try db.execute(sql: "PRAGMA journal_mode = WAL")
+        }
         self.dbQueue = try DatabaseQueue(path: path.path, configuration: config)
         try migrate()
     }
@@ -375,6 +384,20 @@ public final class SpeakerStore: @unchecked Sendable {
                 arguments: [date, id]
             )
         }
+    }
+
+    /// GDPR: physically remove the WAV file AND flag the recording as audio-deleted,
+    /// keeping the transcript and speaker data. Mirrors the app's `removeAudioFile`
+    /// (LibraryViewModel) so headless callers (CLI, MCP server) behave identically.
+    /// No-op-safe if the recording is missing or its audio was already deleted.
+    /// Returns true if the recording exists and now has its audio deleted.
+    @discardableResult
+    public func deleteAudio(id: String, at date: Date = Date()) throws -> Bool {
+        guard let recording = try recording(id: id) else { return false }
+        guard recording.hasAudio else { return true }
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: recording.sourcePath))
+        try markAudioDeleted(id: id, at: date)
+        return true
     }
 
     public func setSourceHash(recordingId: String, hash: String) throws {
