@@ -10,13 +10,21 @@ Built on [FluidAudio](https://github.com/FluidInference/FluidAudio) (diarization
 
 ## Features
 
-- **Record & transcribe in one step** — capture mic + system audio simultaneously (great for meetings), auto-transcribe on stop.
-- **Cross-recording speaker matching** — voice embeddings are stored once; the same person is recognized in every future recording.
-- **Manual speaker correction** — relabel speakers globally or fix a single segment when the diarizer guesses wrong.
-- **Full-text search** — SQLite FTS5 across every transcript, with snippets and ranking.
+- **Record & transcribe in one step** — capture mic + system audio simultaneously (great for meetings), auto-transcribe on stop. → [docs](docs/recording.md)
+- **Stereo channel separation** — when recording mic + system audio, each goes on its own channel (mic = left, system = right) and is diarized independently, so speaker echo never collapses everyone into one voice. → [docs](docs/recording.md#mic--system-audio-together-stereo-separation)
+- **Auto Recording Mode** — detects when a call starts (another app grabs the mic) and records it hands-free, stopping and transcribing on its own. → [docs](docs/auto-recording.md)
+- **Cross-recording speaker matching** — voice embeddings are stored once; the same person is recognized in every future recording. → [docs](docs/transcripts-and-speakers.md#how-speakers-are-recognized)
+- **Manual speaker correction** — rename speakers globally, reassign or split segments, and merge duplicate identities when the diarizer guesses wrong. → [docs](docs/transcripts-and-speakers.md#correcting-speakers)
+- **Synced playback** — play the audio and watch the transcript highlight and auto-scroll; click any timestamp to jump. → [docs](docs/transcripts-and-speakers.md#reading-a-transcript)
+- **Live recording feedback** — per-device level meters, mic selection, and automatic recovery if the input device changes mid-recording. → [docs](docs/recording.md#live-level-meters)
+- **Full-text search** — SQLite FTS5 across every transcript, with snippets and ranking. → [docs](docs/search.md)
+- **Folders & organization** — group recordings into nested folders with drag-and-drop and inline rename. → [docs](docs/organizing.md)
+- **Privacy-first** — fully on-device; delete raw audio while keeping transcripts (GDPR-friendly), with optional auto-clean of old audio and a menu-bar stealth mode. → [docs](docs/privacy.md)
 - **Markdown + JSON output** — transcripts are written as readable Markdown and queryable JSON.
 - **Local archive** — recordings, transcripts, and the speaker database live under `~/Library/Application Support/diarize/` (configurable).
 - **Two front-ends** — a scriptable CLI (`diarize`) and a native SwiftUI app (`diarize-app`) backed by the same `DiarizeCore` library.
+
+📖 **New here?** Start with the [User Guide](docs/README.md).
 
 ## Requirements
 
@@ -67,7 +75,23 @@ diarize config show
 diarize config set default.language en
 ```
 
-All commands accept `--help` for full options.
+All commands accept `--help` for full options. Full command reference: [docs/cli.md](docs/cli.md).
+
+## Documentation
+
+User-facing guides live in [`docs/`](docs/README.md):
+
+| Guide | What it covers |
+| --- | --- |
+| [Getting Started](docs/getting-started.md) | Install, permissions, first recording |
+| [Recording](docs/recording.md) | Sources, mic selection, level meters, stereo separation |
+| [Auto Recording Mode](docs/auto-recording.md) | Hands-free call capture |
+| [Transcripts & Speakers](docs/transcripts-and-speakers.md) | Reading transcripts and correcting speakers |
+| [Organizing Recordings](docs/organizing.md) | Folders, drag-and-drop, renaming |
+| [Search](docs/search.md) | Full-text search across transcripts |
+| [Privacy & Data](docs/privacy.md) | On-device processing, audio deletion, stealth mode |
+| [Settings](docs/settings.md) | Language, matching threshold, archive, maintenance |
+| [CLI Reference](docs/cli.md) | Every `diarize` command and option |
 
 ## Configuration
 
@@ -89,7 +113,8 @@ Sources/
     Storage/      GRDB models, migrations, speaker store
     Render/       Markdown + JSON renderers
   DiarizeCLI/     `diarize` executable (ArgumentParser)
-  DiarizeApp/     `diarize-app` SwiftUI app (sidebar, recording detail, search)
+  DiarizeApp/     `diarize-app` SwiftUI app (sidebar/folders, recording detail,
+                  search, auto-recording mode, permissions, privacy cleanup, menu bar)
 Resources/icon/   App icon (SVG + .icns)
 Scripts/          Build helpers (app bundle, icon, code signing)
 Tests/            DiarizeCore unit tests
@@ -97,8 +122,8 @@ Tests/            DiarizeCore unit tests
 
 ## How it works
 
-1. **Capture** — `AudioRecorder` taps the microphone via `AVAudioEngine` and system audio via `ScreenCaptureKit`; `AudioMixer` merges them into a single WAV.
-2. **Diarize** — FluidAudio segments the waveform by speaker and emits a 256-dim embedding per segment.
+1. **Capture** — `AudioRecorder` taps the microphone via `AVAudioEngine` and system audio via a `ScreenCaptureKit` / CoreAudio process tap; `AudioMixer` writes a WAV. With both sources active it writes **stereo** (mic = left, system = right) so the two can be diarized in isolation; a single source is written mono.
+2. **Diarize** — FluidAudio segments the waveform by speaker and emits an embedding per segment. For stereo recordings each channel is diarized independently and merged with `local` / `remote` prefixes, avoiding echo-induced speaker confusion.
 3. **Match** — `SpeakerMatcher` compares each new embedding against the SQLite speaker library (cosine similarity ≥ threshold) and either reuses an existing speaker ID or mints a new one.
 4. **Transcribe** — each segment is fed to FluidAudio's ASR model in the chosen language.
 5. **Persist** — `SpeakerStore` writes recording, segments, and transcript text into SQLite (with FTS5); Markdown + JSON renderers produce human-readable artifacts under the archive.
