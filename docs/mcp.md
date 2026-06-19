@@ -105,7 +105,7 @@ marked, and the two irreversible ones are called out explicitly.
 | `list_folders` | All folders; nesting is described by each folder's `parentId`. |
 | `list_recordings` | Recordings, **newest first**, with title, state, duration, folder, `processed` flag, and any `errorMessage`. Filterable — see below. |
 | `get_recording` | Full metadata for one recording, including `hasAudio` and segment count. |
-| `get_transcript` | The diarized transcript as structured segments with speaker labels. |
+| `get_transcript` | The diarized transcript as structured segments — each with an `id`, time range, speaker id/label, text and ASR `confidence`. The `id` + `confidence` (and the text itself) are what an agent uses to judge and target diarization mistakes. |
 | `recording_status` | Whether a recording is in progress right now, and which. |
 
 **Filtering `list_recordings`** — combine any of:
@@ -128,6 +128,26 @@ marked, and the two irreversible ones are called out explicitly.
 | `set_processed` | **Bulk** set or clear the `processed` flag on one or more recordings. |
 | `delete_folder` | ⚠️ Delete a folder. Child folders are deleted; recordings inside are **moved to the root**, not deleted. |
 | `delete_audio` | ⚠️ **Irreversible.** Permanently delete a recording's raw audio while keeping its transcript and speaker data — the same [GDPR audio deletion](privacy.md#deleting-audio-keeping-the-transcript) the app offers. |
+
+### Correcting diarization
+
+An agent can read a transcript, spot where a speaker turn was attributed to the wrong person
+(or where two people share one turn, or an unknown speaker is actually someone known), and fix
+it. Each correction also re-renders the recording's `.md`/`.json` files so they stay in sync,
+and segment/speaker reassignments **move the underlying voice embedding** too — so the speaker
+matcher learns and future recordings get matched better.
+
+| Tool | Effect |
+| --- | --- |
+| `reassign_segment` | Move a mis-attributed segment (by `id` from `get_transcript`) to the correct, existing speaker. |
+| `create_speaker` | Create a new speaker — e.g. to attribute a voice that isn't a known speaker yet. |
+| `rename_speaker` | Set or clear a speaker's name (e.g. name an `Unbekannt-…` speaker identified from the text). |
+| `merge_speakers` | ⚠️ Merge two identities that are the same person: `from`'s segments + embeddings move to `into`, then `from` is deleted. |
+| `split_segment` | Split one segment at a timestamp when it bundled two speakers; the new half can then be reassigned. |
+
+Typical flow: `get_transcript` → notice an `Unbekannt-…` speaker is "Anna" → `rename_speaker`
+it → `reassign_segment` any of her turns that were mis-attributed (or `create_speaker` first if
+she's brand new). Use `split_segment` when one segment's text clearly switches speaker mid-turn.
 
 ### Retrying analysis
 

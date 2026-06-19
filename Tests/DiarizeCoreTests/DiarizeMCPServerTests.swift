@@ -134,4 +134,114 @@ import MCP
         let obj = try #require(try json(result) as? [String: Any])
         #expect(obj["isRecording"] as? Bool == true)
     }
+
+    // MARK: - Diarization correction
+
+    /// Insert a recording whose transcript files live in a writable temp dir, with one
+    /// segment for `speakerId` plus an embedding aligned to that segment's time range.
+    @discardableResult
+    private func insertWithSegment(
+        _ store: SpeakerStore, recId: String, speakerId: String
+    ) throws -> Int64 {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("diarize-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let rec = Recording(
+            id: recId, title: recId, sourcePath: "/dev/null", durationSec: 10, language: "en",
+            transcriptMd: dir.appendingPathComponent("\(recId).md").path,
+            transcriptJson: dir.appendingPathComponent("\(recId).json").path,
+            createdAt: Date()
+        )
+        let seg = RecordingSegment(recordingId: recId, speakerId: speakerId, startSec: 1, endSec: 3, text: "hello there", confidence: 0.9)
+        try store.insertRecording(rec, segments: [seg])
+        try store.insertEmbedding(SpeakerEmbedding(speakerId: speakerId, vector: [1, 0], recordingId: recId, segmentStart: 1, segmentEnd: 3))
+        return try #require(try store.segments(for: recId).first?.id)
+    }
+
+    @Test func transcriptIncludesSegmentId() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); try store.insertSpeaker(a)
+        let segId = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(name: "get_transcript", arguments: ["id": "rec"])
+        let obj = try #require(try json(result) as? [String: Any])
+        let segs = try #require(obj["segments"] as? [[String: Any]])
+        #expect(segs.first?["id"] as? Int == Int(segId))
+    }
+
+    @Test func reassignSegmentMovesSpeakerAndEmbedding() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); let b = Speaker(label: "B")
+        try store.insertSpeaker(a); try store.insertSpeaker(b)
+        let segId = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(
+            name: "reassign_segment", arguments: ["segmentId": .int(Int(segId)), "speakerId": .string(b.id)])
+        #expect(result.isError != true)
+        #expect(try store.segments(for: "rec").first?.speakerId == b.id)
+        #expect(try store.embeddings(for: a.id).isEmpty)
+        #expect(try store.embeddings(for: b.id).count == 1)
+    }
+
+    @Test func reassignSegmentRejectsUnknownSpeaker() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); try store.insertSpeaker(a)
+        let segId = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(
+            name: "reassign_segment", arguments: ["segmentId": .int(Int(segId)), "speakerId": "spk_missing"])
+        #expect(result.isError == true)
+        #expect(text(result).contains("speaker"))
+    }
+
+    @Test func createSpeakerReturnsNewSpeaker() async throws {
+        let (server, store) = try makeServer()
+        let result = await server.callTool(name: "create_speaker", arguments: ["label": "Anna"])
+        let obj = try #require(try json(result) as? [String: Any])
+        let id = try #require(obj["id"] as? String)
+        #expect(obj["label"] as? String == "Anna")
+        #expect(try store.speaker(id: id)?.label == "Anna")
+    }
+
+    @Test func renameSpeakerSetsLabel() async throws {
+        let (server, store) = try makeServer()
+        let s = Speaker(label: nil); try store.insertSpeaker(s)
+        try insertWithSegment(store, recId: "rec", speakerId: s.id)
+
+        let result = await server.callTool(name: "rename_speaker", arguments: ["id": .string(s.id), "label": "Björn"])
+        #expect(result.isError != true)
+        #expect(try store.speaker(id: s.id)?.label == "Björn")
+    }
+
+    @Test func mergeSpeakersCollapsesIdentity() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); let b = Speaker(label: "B")
+        try store.insertSpeaker(a); try store.insertSpeaker(b)
+        try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(name: "merge_speakers", arguments: ["from": .string(a.id), "into": .string(b.id)])
+        #expect(result.isError != true)
+        #expect(try store.speaker(id: a.id) == nil)
+        #expect(try store.segments(for: "rec").first?.speakerId == b.id)
+    }
+
+    @Test func mergeSpeakersRejectsSameId() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); try store.insertSpeaker(a)
+        let result = await server.callTool(name: "merge_speakers", arguments: ["from": .string(a.id), "into": .string(a.id)])
+        #expect(result.isError == true)
+    }
+
+    @Test func splitSegmentReturnsNewId() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); try store.insertSpeaker(a)
+        let segId = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(
+            name: "split_segment", arguments: ["segmentId": .int(Int(segId)), "atSec": .double(2.0)])
+        #expect(result.isError != true)
+        let obj = try #require(try json(result) as? [String: Any])
+        #expect(obj["newSegmentId"] as? Int != nil)
+        #expect(try store.segments(for: "rec").count == 2)
+    }
 }

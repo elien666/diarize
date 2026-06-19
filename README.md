@@ -20,7 +20,7 @@ Built on [FluidAudio](https://github.com/FluidInference/FluidAudio) (diarization
 - **Full-text search** — SQLite FTS5 across every transcript, with snippets and ranking. → [docs](docs/search.md)
 - **Folders & organization** — group recordings into nested folders with drag-and-drop and inline rename. → [docs](docs/organizing.md)
 - **Privacy-first** — fully on-device; delete raw audio while keeping transcripts (GDPR-friendly), with optional auto-clean of old audio and a menu-bar stealth mode. → [docs](docs/privacy.md)
-- **MCP server for agents** — expose the library to local AI agents over [Model Context Protocol](https://modelcontextprotocol.io): read recordings/speakers, find unprocessed work, mark recordings processed, retry failed analyses, and manage titles and folders — all on-device. → [docs](docs/mcp.md)
+- **MCP server for agents** — expose the library to local AI agents over [Model Context Protocol](https://modelcontextprotocol.io): read recordings/speakers, find unprocessed work, mark recordings processed, retry failed analyses, manage titles and folders, and assess + correct diarization quality (reassign mis-attributed segments, name/merge speakers, split turns) — all on-device. → [docs](docs/mcp.md)
 - **Markdown + JSON output** — transcripts are written as readable Markdown and queryable JSON.
 - **Local archive** — recordings, transcripts, and the speaker database live under `~/Library/Application Support/diarize/` (configurable).
 - **Two front-ends + an agent interface** — a scriptable CLI (`diarize`) and a native SwiftUI app (`diarize-app`), plus an MCP server, all backed by the same `DiarizeCore` library.

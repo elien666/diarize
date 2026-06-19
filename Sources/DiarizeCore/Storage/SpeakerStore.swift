@@ -267,6 +267,30 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    /// Move a segment to a different speaker AND move that segment's voice embedding(s) to the
+    /// same speaker, so the k-NN matcher learns from the correction and future recordings match
+    /// better. Embeddings are matched to the segment by (recordingId, time range) with a small
+    /// tolerance; a segment may have no matching embedding (very short turns, or the new half of
+    /// a split whose range no longer lines up) — then only the transcript label moves.
+    public func reassignSegment(segmentId: Int64, toSpeakerId: String) throws {
+        try dbQueue.write { db in
+            guard let seg = try RecordingSegment.fetchOne(db, key: segmentId) else {
+                throw SpeakerStoreError.segmentNotFound(segmentId)
+            }
+            try db.execute(
+                sql: "UPDATE recording_segments SET speakerId = ? WHERE id = ?",
+                arguments: [toSpeakerId, segmentId]
+            )
+            try db.execute(
+                sql: """
+                    UPDATE speaker_embeddings SET speakerId = ?
+                    WHERE recordingId = ? AND ABS(segmentStart - ?) < 0.01 AND ABS(segmentEnd - ?) < 0.01
+                """,
+                arguments: [toSpeakerId, seg.recordingId, seg.startSec, seg.endSec]
+            )
+        }
+    }
+
     /// Split a segment at `splitTimeSec` (absolute, in the original audio timeline).
     /// First half keeps the original id and ends at splitTimeSec; second half is a new
     /// segment with the same speaker (caller may reassign afterwards).

@@ -38,6 +38,21 @@ struct ToolArgs {
         return Int(v, strict: false)
     }
 
+    func requiredInt(_ key: String) throws -> Int {
+        guard let i = int(key) else { throw MCPToolError("Missing required integer argument '\(key)'") }
+        return i
+    }
+
+    func double(_ key: String) -> Double? {
+        guard let v = raw[key] else { return nil }
+        return Double(v, strict: false)
+    }
+
+    func requiredDouble(_ key: String) throws -> Double {
+        guard let d = double(key) else { throw MCPToolError("Missing required number argument '\(key)'") }
+        return d
+    }
+
     func bool(_ key: String) -> Bool? {
         guard let v = raw[key] else { return nil }
         return Bool(v, strict: false)
@@ -152,6 +167,7 @@ struct RecordingDetailDTO: Encodable {
 }
 
 struct TranscriptSegmentDTO: Encodable {
+    let id: Int64
     let startSec: Double
     let endSec: Double
     let speakerId: String?

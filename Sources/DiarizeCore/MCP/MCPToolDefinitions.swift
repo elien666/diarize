@@ -57,7 +57,7 @@ extension DiarizeMCPServer {
             ),
             Tool(
                 name: "get_transcript",
-                description: "Get the diarized transcript of a recording as structured segments with speaker labels.",
+                description: "Get the diarized transcript of a recording as structured segments, each with an id, time range, speakerId/label, text and ASR confidence. Use the text + confidence to judge diarization quality, then correct it with reassign_segment / split_segment / rename_speaker / merge_speakers.",
                 inputSchema: schema(properties: ["id": prop("string", "Recording id.")], required: ["id"]),
                 annotations: readOnly
             ),
@@ -131,6 +131,52 @@ extension DiarizeMCPServer {
                 description: "Re-run diarization + transcription on a recording (e.g. one that failed). Returns immediately; analysis runs in the background. Poll get_recording until processingState is done/empty/failed. Fails if the audio was deleted.",
                 inputSchema: schema(properties: ["id": prop("string", "Recording id.")], required: ["id"]),
                 annotations: Tool.Annotations(readOnlyHint: false, destructiveHint: false, idempotentHint: false)
+            ),
+
+            // MARK: Diarization correction
+            Tool(
+                name: "reassign_segment",
+                description: "Fix a mis-attributed segment: move it to the correct speaker (use a segment id from get_transcript). Also moves the segment's voice embedding so future recordings match this voice better. The speaker must already exist (see create_speaker / list_speakers).",
+                inputSchema: schema(properties: [
+                    "segmentId": prop("integer", "Segment id from get_transcript."),
+                    "speakerId": prop("string", "Target speaker id (must exist)."),
+                ], required: ["segmentId", "speakerId"]),
+                annotations: safeWrite
+            ),
+            Tool(
+                name: "create_speaker",
+                description: "Create a new speaker, e.g. to attribute a voice that isn't a known speaker yet. Returns the new speaker. Reassign segments to it with reassign_segment.",
+                inputSchema: schema(properties: [
+                    "label": prop("string", "Optional name for the speaker."),
+                ]),
+                annotations: creating
+            ),
+            Tool(
+                name: "rename_speaker",
+                description: "Set or clear a speaker's name (e.g. name an 'Unbekannt-…' speaker you identified from the transcript). Re-renders the transcript files of every recording the speaker appears in.",
+                inputSchema: schema(properties: [
+                    "id": prop("string", "Speaker id."),
+                    "label": prop("string", "New name, or empty/null to clear it."),
+                ], required: ["id"]),
+                annotations: safeWrite
+            ),
+            Tool(
+                name: "merge_speakers",
+                description: "Merge two speaker identities that are the same person: all of 'from''s segments and voice embeddings move to 'into', then 'from' is deleted. Re-renders the affected recordings.",
+                inputSchema: schema(properties: [
+                    "from": prop("string", "Speaker id to merge away (deleted)."),
+                    "into": prop("string", "Speaker id to keep."),
+                ], required: ["from", "into"]),
+                annotations: destructive
+            ),
+            Tool(
+                name: "split_segment",
+                description: "Split one segment at an absolute timestamp (seconds) when it bundled two speakers' speech. The first half keeps the original id; the second half is a new segment with the same speaker — reassign it afterwards. Returns the new segment id.",
+                inputSchema: schema(properties: [
+                    "segmentId": prop("integer", "Segment id from get_transcript."),
+                    "atSec": prop("number", "Absolute split time in seconds, strictly inside the segment."),
+                ], required: ["segmentId", "atSec"]),
+                annotations: safeWrite
             ),
         ]
     }

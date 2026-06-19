@@ -76,7 +76,13 @@ public final class DiarizeMCPServer: @unchecked Sendable {
                 recordings' error messages and retry their analysis, and manage \
                 titles, folders and GDPR audio deletion. Recording analysis is \
                 long-running: retry_analysis returns immediately; poll get_recording \
-                until processingState is done/empty/failed.
+                until processingState is done/empty/failed. \
+                You can also assess and correct diarization quality: get_transcript \
+                returns per-segment ids, speaker labels and confidence; fix mistakes \
+                with reassign_segment (wrong speaker), split_segment (one turn bundled \
+                two speakers), rename_speaker (name an unknown speaker) and \
+                merge_speakers (same person split in two). Corrections also move voice \
+                embeddings, so future recordings get matched better.
                 """,
             capabilities: .init(
                 resources: .init(subscribe: false, listChanged: false),
@@ -127,6 +133,11 @@ public final class DiarizeMCPServer: @unchecked Sendable {
             case "set_processed": return Self.ok(try setProcessed(args))
             case "delete_audio": return Self.ok(try deleteAudio(args))
             case "retry_analysis": return Self.ok(try await retryAnalysis(args))
+            case "reassign_segment": return Self.ok(try reassignSegment(args))
+            case "create_speaker": return Self.ok(try createSpeaker(args))
+            case "rename_speaker": return Self.ok(try renameSpeaker(args))
+            case "merge_speakers": return Self.ok(try mergeSpeakers(args))
+            case "split_segment": return Self.ok(try splitSegment(args))
             default: return Self.err("Unknown tool: \(name)")
             }
         } catch let error as MCPToolError {
@@ -188,6 +199,7 @@ public final class DiarizeMCPServer: @unchecked Sendable {
         )
         let segments = try store.segments(for: id).map { seg in
             TranscriptSegmentDTO(
+                id: seg.id ?? 0,
                 startSec: seg.startSec,
                 endSec: seg.endSec,
                 speakerId: seg.speakerId,
@@ -293,6 +305,96 @@ public final class DiarizeMCPServer: @unchecked Sendable {
                 ? "Analysis queued. Poll get_recording until processingState is done/empty/failed."
                 : "Analysis was already queued for this recording.",
         ]))
+    }
+
+    // MARK: - Diarization correction tools
+
+    /// Move a mis-attributed segment to the correct (existing) speaker. Also moves the
+    /// segment's voice embedding so the matcher learns from the correction.
+    func reassignSegment(_ args: ToolArgs) throws -> String {
+        let segmentId = Int64(try args.requiredInt("segmentId"))
+        let speakerId = try args.requiredString("speakerId")
+        guard let seg = try store.segment(id: segmentId) else {
+            throw MCPToolError("No segment with id '\(segmentId)'")
+        }
+        guard try store.speaker(id: speakerId) != nil else {
+            throw MCPToolError("No speaker with id '\(speakerId)'")
+        }
+        try store.reassignSegment(segmentId: segmentId, toSpeakerId: speakerId)
+        try rerender(recordingId: seg.recordingId)
+        return try MCPJSON.string(Value.object([
+            "ok": true, "segmentId": .int(Int(segmentId)), "speakerId": .string(speakerId),
+        ]))
+    }
+
+    /// Create a new speaker (e.g. to attribute a voice that isn't a known speaker yet).
+    func createSpeaker(_ args: ToolArgs) throws -> String {
+        let label = args.string("label")
+        let speaker = Speaker(label: label?.isEmpty == true ? nil : label)
+        try store.insertSpeaker(speaker)
+        return try MCPJSON.string(SpeakerDTO(speaker))
+    }
+
+    /// Rename a speaker (or clear the label with an empty/null value). Re-renders every
+    /// recording the speaker appears in so the new label shows up in the transcript files.
+    func renameSpeaker(_ args: ToolArgs) throws -> String {
+        let id = try args.requiredString("id")
+        guard try store.speaker(id: id) != nil else {
+            throw MCPToolError("No speaker with id '\(id)'")
+        }
+        let label = args.string("label")
+        let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try store.updateLabel(id: id, label: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+        for appearance in try store.recordings(for: id) {
+            try rerender(recordingId: appearance.recording.id)
+        }
+        return try MCPJSON.string(Value.object(["ok": true, "id": .string(id)]))
+    }
+
+    /// Merge two speaker identities that are the same person: all of `from`'s embeddings and
+    /// segments move to `into`, then `from` is deleted.
+    func mergeSpeakers(_ args: ToolArgs) throws -> String {
+        let from = try args.requiredString("from")
+        let into = try args.requiredString("into")
+        guard from != into else { throw MCPToolError("'from' and 'into' must be different speakers") }
+        guard try store.speaker(id: from) != nil else { throw MCPToolError("No speaker with id '\(from)'") }
+        guard try store.speaker(id: into) != nil else { throw MCPToolError("No speaker with id '\(into)'") }
+        // Capture affected recordings before the merge removes `from`.
+        let affected = try store.recordings(for: from).map(\.recording.id)
+        try store.mergeSpeakers(from: from, into: into)
+        for recordingId in affected {
+            try rerender(recordingId: recordingId)
+        }
+        return try MCPJSON.string(Value.object([
+            "ok": true, "into": .string(into), "recordingsRerendered": .int(affected.count),
+        ]))
+    }
+
+    /// Split one segment at an absolute timestamp so each half can be attributed separately.
+    /// The first half keeps the original id; the second half is a new segment with the same
+    /// speaker (reassign it afterwards). Returns the new segment id.
+    func splitSegment(_ args: ToolArgs) throws -> String {
+        let segmentId = Int64(try args.requiredInt("segmentId"))
+        let atSec = try args.requiredDouble("atSec")
+        guard let seg = try store.segment(id: segmentId) else {
+            throw MCPToolError("No segment with id '\(segmentId)'")
+        }
+        let newId = try store.splitSegment(segmentId: segmentId, at: atSec)
+        try rerender(recordingId: seg.recordingId)
+        return try MCPJSON.string(Value.object([
+            "ok": true, "segmentId": .int(Int(segmentId)), "newSegmentId": .int(Int(newId)),
+        ]))
+    }
+
+    /// Re-render a recording's markdown + JSON transcript from the current DB state, so files
+    /// stay consistent with diarization edits. Cheap — loads no models.
+    private func rerender(recordingId: String) throws {
+        let pipeline = TranscribePipeline(config: config, store: store)
+        do {
+            _ = try pipeline.rerender(recordingId: recordingId)
+        } catch {
+            throw MCPToolError("Edit saved, but re-rendering transcript files failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Resources
