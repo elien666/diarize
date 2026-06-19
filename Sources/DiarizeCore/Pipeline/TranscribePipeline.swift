@@ -232,12 +232,34 @@ public final class TranscribePipeline {
 
             progress.step("Transcribing \(diarization.segments.count) segments …")
             let asrLang: Language? = (modelVersion == .v3) ? TranscriptionPipeline.language(for: lang) : nil
-            let transcribed = try await asr.transcribe(
-                diarized: diarization.segments,
-                samples: audio.samples,
-                sampleRate: audio.sampleRate,
-                language: asrLang
-            )
+            let transcribed: [TranscribedSegment]
+            if audio.isStereoSplit {
+                // Transcribe each channel from its OWN samples, not the downmix. The
+                // mic channel captures the remote side played back through speakers as
+                // a delayed echo; downmixing mic+system reintroduces that echo (comb
+                // filtering) and wrecks ASR, dropping almost every segment to empty
+                // text. Diarization already ran per channel for the same reason; the
+                // merged segment IDs carry the "local-"/"remote-" prefixes so we can
+                // route each segment back to its source channel.
+                let localSegs = diarization.segments.filter { $0.localSpeakerId.hasPrefix("local-") }
+                let remoteSegs = diarization.segments.filter { $0.localSpeakerId.hasPrefix("remote-") }
+                let localTx = try await asr.transcribe(
+                    diarized: localSegs, samples: audio.micChannel!,
+                    sampleRate: audio.sampleRate, language: asrLang
+                )
+                let remoteTx = try await asr.transcribe(
+                    diarized: remoteSegs, samples: audio.systemChannel!,
+                    sampleRate: audio.sampleRate, language: asrLang
+                )
+                transcribed = localTx + remoteTx
+            } else {
+                transcribed = try await asr.transcribe(
+                    diarized: diarization.segments,
+                    samples: audio.samples,
+                    sampleRate: audio.sampleRate,
+                    language: asrLang
+                )
+            }
 
             let segments: [RecordingSegment] = transcribed.map { seg in
                 RecordingSegment(
