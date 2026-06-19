@@ -27,6 +27,13 @@ public final class SpeakerStore: @unchecked Sendable {
         try migrator.migrate(dbQueue)
     }
 
+    /// SQLite's cross-process change counter. The returned value changes whenever
+    /// *another* connection (e.g. a `diarize mcp` process) commits to the database;
+    /// commits on this connection do not change it. Used to detect external edits.
+    public func dataVersion() throws -> Int64 {
+        try dbQueue.read { db in try Int64.fetchOne(db, sql: "PRAGMA data_version") ?? 0 }
+    }
+
     // MARK: - Speakers
 
     public func allSpeakers() throws -> [Speaker] {

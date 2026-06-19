@@ -50,6 +50,51 @@ final class LibraryViewModel: ObservableObject {
         self.searchService = SearchService(store: store)
         recoverOrphanedRecordings()
         reload()
+        lastDataVersion = try? store.dataVersion()
+        startWatchingExternalChanges()
+    }
+
+    // MARK: - External (cross-process) change detection
+
+    /// A separate `diarize mcp` process can mutate the shared SQLite database while
+    /// the app is open. GRDB's in-process observation can't see those writes, so we
+    /// poll SQLite's `PRAGMA data_version` — which changes only when another
+    /// connection commits — and reload when it moves. The app's own writes go
+    /// through the same connection and do not bump it, so this never double-reloads.
+    private var changeTimer: Timer?
+    private var lastDataVersion: Int64?
+
+    private func startWatchingExternalChanges() {
+        changeTimer?.invalidate()
+        let t = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.pollExternalChanges() }
+        }
+        t.tolerance = 0.5
+        changeTimer = t
+    }
+
+    private func stopWatchingExternalChanges() {
+        changeTimer?.invalidate()
+        changeTimer = nil
+    }
+
+    /// Reload the library if another process has committed since we last checked.
+    /// Also called on app activation for an immediate refresh (no poll-interval wait).
+    func pollExternalChanges() {
+        guard let v = try? store.dataVersion() else { return }
+        guard v != lastDataVersion else { return }
+        lastDataVersion = v
+        reload()
+    }
+
+    /// Pause/resume polling while the app is backgrounded to avoid idle wakeups.
+    func appDidBecomeActive() {
+        startWatchingExternalChanges()
+        pollExternalChanges()
+    }
+
+    func appDidResignActive() {
+        stopWatchingExternalChanges()
     }
 
     /// On launch, recover recordings stuck in `recording`/`analyzing` state from a previous

@@ -29,6 +29,12 @@ struct DiarizeAppMain: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     // Re-check after the user returns from System Settings.
                     permissions.refresh()
+                    // Immediately pick up any changes a `diarize mcp` process made
+                    // while we were in the background, and resume change polling.
+                    library.appDidBecomeActive()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                    library.appDidResignActive()
                 }
                 .withHostingWindow { window in
                     if statusBar == nil, let window {
