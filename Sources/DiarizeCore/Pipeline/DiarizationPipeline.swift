@@ -59,7 +59,17 @@ public final class DiarizationPipeline {
     }
 
     public func diarize(samples: [Float]) async throws -> DiarizationOutput {
-        let result = try await manager.process(audio: samples)
+        let result: DiarizationResult
+        do {
+            result = try await manager.process(audio: samples)
+        } catch OfflineDiarizationError.noSpeechDetected {
+            // No detectable speech in this audio. This is expected for a silent or
+            // near-field-empty channel of a stereo mic+system recording (e.g. a
+            // meeting where the local mic only caught faint room noise). Return an
+            // empty result instead of throwing so a single quiet channel cannot
+            // abort analysis of the other channel that does contain speech.
+            return DiarizationOutput(segments: [], speakerCentroids: [:])
+        }
 
         let segments = result.segments.map { seg in
             LocalDiarizedSegment(
