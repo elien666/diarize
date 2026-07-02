@@ -22,11 +22,17 @@ echo "→ Build icon"
 
 echo "→ swift build (release)"
 cd "$ROOT_DIR"
-swift build -c release --product diarize-app
+swift build -c release --product diarize-app --product diarize
 
 BIN="$ROOT_DIR/.build/release/diarize-app"
 if [[ ! -x "$BIN" ]]; then
     echo "✗ Built binary not found at $BIN" >&2
+    exit 1
+fi
+
+CLI_BIN="$ROOT_DIR/.build/release/diarize"
+if [[ ! -x "$CLI_BIN" ]]; then
+    echo "✗ Built binary not found at $CLI_BIN" >&2
     exit 1
 fi
 
@@ -35,6 +41,8 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RES"
 cp "$BIN" "$MACOS/$EXECUTABLE_NAME"
 chmod +x "$MACOS/$EXECUTABLE_NAME"
+cp "$CLI_BIN" "$MACOS/diarize"
+chmod +x "$MACOS/diarize"
 
 ICON_SRC="$ROOT_DIR/Resources/icon/Diarize.icns"
 if [[ -f "$ICON_SRC" ]]; then
