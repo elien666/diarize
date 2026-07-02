@@ -73,15 +73,7 @@ public enum AudioLoader {
         let outCapacity = AVAudioFrameCount(Double(monoBuf.frameLength) * ratio + 32)
         guard let outBuf = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outCapacity) else { return [] }
 
-        var error: NSError?
-        var fed = false
-        conv.convert(to: outBuf, error: &error) { _, status in
-            if fed { status.pointee = .noDataNow; return nil }
-            fed = true
-            status.pointee = .haveData
-            return monoBuf
-        }
-        if error != nil { return [] }
+        guard (try? conv.convert(to: outBuf, from: monoBuf)) != nil else { return [] }
 
         guard let ch = outBuf.floatChannelData else { return [] }
         return Array(UnsafeBufferPointer(start: ch[0], count: Int(outBuf.frameLength)))
