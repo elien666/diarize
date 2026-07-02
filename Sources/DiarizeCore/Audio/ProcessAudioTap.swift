@@ -128,13 +128,19 @@ final class ProcessAudioTap: @unchecked Sendable {
         )
 
         let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else {
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw ProcessAudioTapError.invalidFormat
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        // Pass nil so AVAudioEngine derives the tap format from the node itself.
+        // Passing a separately-queried format risks an *uncatchable* Obj-C exception
+        // ("required condition is false …") inside installTap when it doesn't exactly
+        // match the node's live hardware format — which happens transiently when the
+        // default output device changes (e.g. a Bluetooth headset connecting and
+        // switching to HFP). Read the real format from each delivered buffer instead.
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
-            let samples = self.resample(buffer: buffer, inputFormat: inputFormat)
+            let samples = self.resample(buffer: buffer, inputFormat: buffer.format)
             if !samples.isEmpty {
                 self.onSamples(samples)
             }

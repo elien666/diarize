@@ -183,13 +183,19 @@ public final class AudioRecorder: NSObject, @unchecked Sendable {
         }
 
         let inputFormat = input.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else {
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw RecorderError.audioEngineFailedToStart("Microphone is not providing a valid sample rate (permission granted?)")
         }
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        // Pass nil so AVAudioEngine derives the tap format from the node itself. A
+        // separately-queried format can trigger an *uncatchable* Obj-C exception
+        // ("required condition is false …") inside installTap when it doesn't exactly
+        // match the node's live hardware format — which happens transiently when the
+        // input device changes (e.g. a Bluetooth headset connecting and switching to
+        // HFP). Read the real format from each delivered buffer instead.
+        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
-            let samples = self.resample(buffer: buffer, inputFormat: inputFormat, converter: &self.micConverter)
+            let samples = self.resample(buffer: buffer, inputFormat: buffer.format, converter: &self.micConverter)
             self.samplesReceived[.mic, default: 0] += samples.count
             self.meter.feed(samples, channel: .mic)
             self.mixer.append(samples, channel: .mic)
