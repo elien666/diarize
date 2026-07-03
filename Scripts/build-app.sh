@@ -41,8 +41,11 @@ rm -rf "$APP_DIR"
 mkdir -p "$MACOS" "$RES"
 cp "$BIN" "$MACOS/$EXECUTABLE_NAME"
 chmod +x "$MACOS/$EXECUTABLE_NAME"
-cp "$CLI_BIN" "$MACOS/diarize"
-chmod +x "$MACOS/diarize"
+# Named "diarize-cli", not "diarize" — APFS is case-insensitive by default,
+# so "diarize" would collide with "Diarize" ($EXECUTABLE_NAME) and silently
+# overwrite the GUI binary.
+cp "$CLI_BIN" "$MACOS/diarize-cli"
+chmod +x "$MACOS/diarize-cli"
 
 ICON_SRC="$ROOT_DIR/Resources/icon/Diarize.icns"
 if [[ -f "$ICON_SRC" ]]; then
