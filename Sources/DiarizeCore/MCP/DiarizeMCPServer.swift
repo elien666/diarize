@@ -74,7 +74,9 @@ public final class DiarizeMCPServer: @unchecked Sendable {
                 folders, recordings and live recording status. Find the latest or \
                 unprocessed recordings, mark them processed (bulk), read failed \
                 recordings' error messages and retry their analysis, and manage \
-                titles, folders and GDPR audio deletion. Recording analysis is \
+                titles, folders and GDPR audio deletion. Discard noise/false-start \
+                captures entirely with delete_recording (transcript + audio + row), as \
+                opposed to delete_audio which keeps the transcript. Recording analysis is \
                 long-running: retry_analysis returns immediately; poll get_recording \
                 until processingState is done/empty/failed. \
                 You can also assess and correct diarization quality: get_transcript \
@@ -132,6 +134,7 @@ public final class DiarizeMCPServer: @unchecked Sendable {
             case "delete_folder": return Self.ok(try deleteFolder(args))
             case "set_processed": return Self.ok(try setProcessed(args))
             case "delete_audio": return Self.ok(try deleteAudio(args))
+            case "delete_recording": return Self.ok(try deleteRecording(args))
             case "retry_analysis": return Self.ok(try await retryAnalysis(args))
             case "reassign_segment": return Self.ok(try reassignSegment(args))
             case "create_speaker": return Self.ok(try createSpeaker(args))
@@ -280,6 +283,30 @@ public final class DiarizeMCPServer: @unchecked Sendable {
         return try MCPJSON.string(Value.object([
             "ok": true, "id": .string(id),
             "audioDeletedAt": deletedAt.map { .string(ISO8601DateFormatter().string(from: $0)) } ?? .null,
+        ]))
+    }
+
+    /// Completely remove one or more recordings (audio + transcript files + DB row,
+    /// which cascades to segments). Accepts a single `id`, an `ids` array, or both;
+    /// de-duplicates and requires at least one. Unlike `deleteAudio`, nothing survives.
+    func deleteRecording(_ args: ToolArgs) throws -> String {
+        var ids = args.stringArray("ids") ?? []
+        if let one = args.string("id") { ids.insert(one, at: 0) }
+        var seen = Set<String>()
+        ids = ids.filter { seen.insert($0).inserted }
+        guard !ids.isEmpty else {
+            throw MCPToolError("Provide a recording 'id' or a non-empty 'ids' array.")
+        }
+        var deleted: [String] = []
+        var missing: [String] = []
+        for id in ids {
+            if try store.deleteRecordingAndFiles(id: id) { deleted.append(id) }
+            else { missing.append(id) }
+        }
+        return try MCPJSON.string(Value.object([
+            "deleted": .int(deleted.count),
+            "deletedIds": .array(deleted.map(Value.string)),
+            "missing": .array(missing.map(Value.string)),
         ]))
     }
 

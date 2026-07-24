@@ -104,6 +104,41 @@ import MCP
         #expect(try store.recording(id: "rec")?.hasAudio == false)
     }
 
+    @Test func deleteRecordingRemovesRowEntirely() async throws {
+        let (server, store) = try makeServer()
+        try insert(store, id: "rec", createdAt: Date())
+
+        let result = await server.callTool(name: "delete_recording", arguments: ["id": "rec"])
+        #expect(result.isError != true)
+        let obj = try #require(try json(result) as? [String: Any])
+        #expect(obj["deleted"] as? Int == 1)
+        #expect(obj["deletedIds"] as? [String] == ["rec"])
+        #expect(try store.recording(id: "rec") == nil)
+    }
+
+    @Test func deleteRecordingBatchReportsMissing() async throws {
+        let (server, store) = try makeServer()
+        try insert(store, id: "a", createdAt: Date(timeIntervalSince1970: 1))
+        try insert(store, id: "b", createdAt: Date(timeIntervalSince1970: 2))
+
+        let result = await server.callTool(
+            name: "delete_recording",
+            arguments: ["ids": .array(["a", "b", "ghost"])]
+        )
+        #expect(result.isError != true)
+        let obj = try #require(try json(result) as? [String: Any])
+        #expect(obj["deleted"] as? Int == 2)
+        #expect(obj["missing"] as? [String] == ["ghost"])
+        #expect(try store.recording(id: "a") == nil)
+        #expect(try store.recording(id: "b") == nil)
+    }
+
+    @Test func deleteRecordingRequiresAnId() async throws {
+        let (server, _) = try makeServer()
+        let result = await server.callTool(name: "delete_recording", arguments: nil)
+        #expect(result.isError == true)
+    }
+
     @Test func retryRejectsGdprDeletedAudio() async throws {
         let (server, store) = try makeServer()
         try insert(store, id: "rec", createdAt: Date(), state: .failed,
