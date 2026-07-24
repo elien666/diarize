@@ -366,6 +366,22 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    /// Permanently remove a recording completely: its raw audio (WAV), both transcript
+    /// files (markdown + JSON) and the database row. Deleting the row cascades to its
+    /// segments and detaches its voice embeddings via foreign keys. Mirrors the app's
+    /// `deleteRecordingAndFiles` (LibraryViewModel) so headless callers (CLI, MCP server)
+    /// behave identically. No-op-safe if the recording is missing.
+    /// Returns true if a recording existed and was deleted.
+    @discardableResult
+    public func deleteRecordingAndFiles(id: String) throws -> Bool {
+        guard let recording = try recording(id: id) else { return false }
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: recording.sourcePath))
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: recording.transcriptMd))
+        try? FileManager.default.removeItem(at: URL(fileURLWithPath: recording.transcriptJson))
+        try deleteRecording(id: id)
+        return true
+    }
+
     public func insertEmptyRecording(_ recording: Recording) throws {
         try dbQueue.write { db in
             var r = recording

@@ -127,6 +127,15 @@ extension DiarizeMCPServer {
                 annotations: destructive
             ),
             Tool(
+                name: "delete_recording",
+                description: "Permanently and completely remove one or more recordings: transcript, segments, raw audio (if still present) and folder/speaker links. Unlike delete_audio — which only deletes the WAV and keeps the transcript — this leaves nothing behind: the recording no longer appears in list_recordings or get_recording. Use to discard noise / false-start captures (empty or fragment transcripts). Irreversible. Pass a single id, or ids for a batch. Returns how many were deleted and any ids that didn't exist.",
+                inputSchema: schema(properties: [
+                    "id": prop("string", "Recording id (single delete)."),
+                    "ids": ["type": "array", "items": ["type": "string"], "description": "Recording ids (batch delete). Combine with or use instead of 'id'."],
+                ]),
+                annotations: destructive
+            ),
+            Tool(
                 name: "retry_analysis",
                 description: "Re-run diarization + transcription on a recording (e.g. one that failed). Returns immediately; analysis runs in the background. Poll get_recording until processingState is done/empty/failed. Fails if the audio was deleted.",
                 inputSchema: schema(properties: ["id": prop("string", "Recording id.")], required: ["id"]),
