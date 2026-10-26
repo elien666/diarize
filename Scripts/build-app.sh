@@ -22,7 +22,25 @@ echo "→ Build icon"
 
 echo "→ swift build (release)"
 cd "$ROOT_DIR"
-swift build -c release --product diarize-app --product diarize
+# The Command Line Tools don't ship the SwiftUI macro plugins the macOS 27 SDK
+# needs (@State etc.). Prefer a full Xcode (if its license is accepted);
+# otherwise build against the newest macOS 26 SDK the CLT has.
+XCODE_DEV=/Applications/Xcode.app/Contents/Developer
+if [[ -z "${DEVELOPER_DIR:-}" && -z "${SDKROOT:-}" ]]; then
+    if [[ -d "$XCODE_DEV" ]] && DEVELOPER_DIR="$XCODE_DEV" /usr/bin/xcrun xcodebuild -license check >/dev/null 2>&1; then
+        export DEVELOPER_DIR="$XCODE_DEV"
+    elif [[ ! -e /Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib ]]; then
+        SDK26="$(ls -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.*.sdk 2>/dev/null | sort -V | tail -1)"
+        if [[ -n "$SDK26" ]]; then
+            echo "  (CLT lacks SwiftUI macros — building against $(basename "$SDK26"))"
+            export SDKROOT="$SDK26"
+        fi
+    fi
+fi
+# One product per invocation — newer SwiftPM builds only the last --product
+# when several are given.
+swift build -c release --product diarize-app
+swift build -c release --product diarize
 
 BIN="$ROOT_DIR/.build/release/diarize-app"
 if [[ ! -x "$BIN" ]]; then
