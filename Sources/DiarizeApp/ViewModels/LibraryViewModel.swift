@@ -387,7 +387,7 @@ final class LibraryViewModel: ObservableObject {
     private nonisolated static func runAnalyze(
         config: AppConfig,
         store: SpeakerStore,
-        progress: ProgressReporter,
+        progress: DiarizeCore.ProgressReporter,
         recordingId: String
     ) async throws -> TranscribeOutput {
         let pipeline = TranscribePipeline(config: config, store: store, progress: progress)
