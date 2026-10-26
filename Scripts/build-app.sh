@@ -107,19 +107,30 @@ EOF
 # Fix: pin the DR to the bundle identifier. This is stable across rebuilds
 # regardless of whether a named identity exists in the keychain.
 DR="identifier \"$BUNDLE_ID\""
+CLI_ID="$BUNDLE_ID.cli"
+CLI_DR="identifier \"$CLI_ID\""
 
 SIGN_IDENTITY="Diarize Local Dev"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$SIGN_IDENTITY\""; then
     echo "→ Code signing with '$SIGN_IDENTITY'"
-    codesign --force --sign "$SIGN_IDENTITY" \
-        --requirements "=designated => $DR" \
-        --deep --timestamp=none "$APP_DIR"
+    SIGN_WITH="$SIGN_IDENTITY"
 else
     echo "→ Code signing (ad-hoc with stable bundle-ID designated requirement)"
-    codesign --force --sign - \
-        --requirements "=designated => $DR" \
-        --deep --timestamp=none "$APP_DIR"
+    SIGN_WITH="-"
 fi
+
+# Sign the embedded CLI on its own first, with its own identifier and DR. A
+# --deep sign of the bundle would stamp the app's DR onto it, which the CLI
+# can't satisfy — the bundle then fails verification ("nested code is
+# modified or invalid") and TCC may refuse it.
+codesign --force --sign "$SIGN_WITH" \
+    --identifier "$CLI_ID" \
+    --requirements "=designated => $CLI_DR" \
+    --timestamp=none "$MACOS/diarize-cli"
+codesign --force --sign "$SIGN_WITH" \
+    --requirements "=designated => $DR" \
+    --timestamp=none "$APP_DIR"
+codesign --verify --deep --strict "$APP_DIR"
 
 echo "✓ Built $APP_DIR"
 
