@@ -151,6 +151,7 @@ struct StatusBar: View {
         switch permission {
         case .microphone: return "Microphone"
         case .screenRecording: return "Screen Recording"
+        case .systemAudio: return "System Audio"
         }
     }
 

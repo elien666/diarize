@@ -92,6 +92,8 @@ cat > "$CONTENTS/Info.plist" <<EOF
     <string>Diarize records your microphone for meeting recordings that are transcribed and archived locally.</string>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Diarize records system audio (e.g. from online meetings) for local transcription. Screen contents are not saved.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Diarize records audio from other apps (e.g. online meetings) for local transcription.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Diarize does not require AppleScript interaction.</string>
 </dict>
