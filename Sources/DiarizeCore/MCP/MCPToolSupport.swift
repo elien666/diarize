@@ -68,6 +68,11 @@ struct ToolArgs {
         return items.compactMap { String($0, strict: false) }
     }
 
+    func intArray(_ key: String) -> [Int]? {
+        guard case let .array(items)? = raw[key] else { return nil }
+        return items.compactMap { Int($0, strict: false) }
+    }
+
     func requiredStringArray(_ key: String) throws -> [String] {
         guard let arr = stringArray(key), !arr.isEmpty else {
             throw MCPToolError("Missing required non-empty string array argument '\(key)'")
@@ -97,13 +102,56 @@ struct SpeakerDTO: Encodable {
     let id: String
     let label: String?
     let displayName: String
+    let named: Bool
     let createdAt: Date
     let notes: String?
+    // Usage stats. Present on list_speakers / get_speaker; omitted elsewhere.
+    let segmentCount: Int?
+    let speechTimeSec: Double?
+    let recordingCount: Int?
+    let lastSeen: Date?
 
-    init(_ s: Speaker) {
-        id = s.id; label = s.label; displayName = s.displayName
+    init(_ s: Speaker, stats: SpeakerStats? = nil, includeStats: Bool = false) {
+        id = s.id; label = s.label; displayName = s.displayName; named = s.label != nil
         createdAt = s.createdAt; notes = s.notes
+        if includeStats {
+            segmentCount = stats?.segmentCount ?? 0
+            speechTimeSec = stats?.speechTimeSec ?? 0
+            recordingCount = stats?.recordingCount ?? 0
+            lastSeen = stats?.lastSeen
+        } else {
+            segmentCount = nil; speechTimeSec = nil; recordingCount = nil; lastSeen = nil
+        }
     }
+}
+
+struct SpeakerAppearanceDTO: Encodable {
+    let recordingId: String
+    let title: String?
+    let createdAt: Date
+    let segmentCount: Int
+    let speechTimeSec: Double
+    let firstAppearanceSec: Double
+}
+
+struct SpeakerSampleDTO: Encodable {
+    let segmentId: Int64
+    let recordingId: String
+    let startSec: Double
+    let endSec: Double
+    let text: String
+}
+
+struct SpeakerDetailDTO: Encodable {
+    let speaker: SpeakerDTO
+    let recordings: [SpeakerAppearanceDTO]
+    let samples: [SpeakerSampleDTO]
+}
+
+struct MergeCandidateDTO: Encodable {
+    let similarity: Float
+    let a: SpeakerDTO
+    let b: SpeakerDTO
 }
 
 struct FolderDTO: Encodable {

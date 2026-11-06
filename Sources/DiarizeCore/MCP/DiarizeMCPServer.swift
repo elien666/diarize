@@ -84,7 +84,12 @@ public final class DiarizeMCPServer: @unchecked Sendable {
                 with reassign_segment (wrong speaker), split_segment (one turn bundled \
                 two speakers), rename_speaker (name an unknown speaker) and \
                 merge_speakers (same person split in two). Corrections also move voice \
-                embeddings, so future recordings get matched better.
+                embeddings, so future recordings get matched better. To clean up the \
+                speaker library: list_speakers (unnamed=true) shows usage stats, \
+                get_speaker returns recordings + sample text to identify someone, \
+                suggest_merges proposes duplicates (verify first, merge_speakers dryRun \
+                previews), reassign_segments moves many segments at once, \
+                set_speaker_notes flags buckets, delete_speaker removes empty speakers.
                 """,
             capabilities: .init(
                 resources: .init(subscribe: false, listChanged: false),
@@ -121,7 +126,9 @@ public final class DiarizeMCPServer: @unchecked Sendable {
         let args = ToolArgs(arguments)
         do {
             switch name {
-            case "list_speakers": return Self.ok(try listSpeakersJSON())
+            case "list_speakers": return Self.ok(try listSpeakersJSON(args))
+            case "get_speaker": return Self.ok(try getSpeakerJSON(args))
+            case "suggest_merges": return Self.ok(try suggestMergesJSON(args))
             case "list_folders": return Self.ok(try listFoldersJSON())
             case "list_recordings": return Self.ok(try listRecordingsJSON(args))
             case "get_recording": return Self.ok(try getRecordingJSON(args))
@@ -131,12 +138,16 @@ public final class DiarizeMCPServer: @unchecked Sendable {
             case "move_recording": return Self.ok(try moveRecording(args))
             case "create_folder": return Self.ok(try createFolder(args))
             case "rename_folder": return Self.ok(try renameFolder(args))
+            case "move_folder": return Self.ok(try moveFolder(args))
             case "delete_folder": return Self.ok(try deleteFolder(args))
             case "set_processed": return Self.ok(try setProcessed(args))
             case "delete_audio": return Self.ok(try deleteAudio(args))
             case "delete_recording": return Self.ok(try deleteRecording(args))
             case "retry_analysis": return Self.ok(try await retryAnalysis(args))
             case "reassign_segment": return Self.ok(try reassignSegment(args))
+            case "reassign_segments": return Self.ok(try reassignSegments(args))
+            case "set_speaker_notes": return Self.ok(try setSpeakerNotes(args))
+            case "delete_speaker": return Self.ok(try deleteSpeaker(args))
             case "create_speaker": return Self.ok(try createSpeaker(args))
             case "rename_speaker": return Self.ok(try renameSpeaker(args))
             case "merge_speakers": return Self.ok(try mergeSpeakers(args))
@@ -152,8 +163,51 @@ public final class DiarizeMCPServer: @unchecked Sendable {
 
     // MARK: - Read tools
 
-    func listSpeakersJSON() throws -> String {
-        try MCPJSON.string(try store.allSpeakers().map(SpeakerDTO.init))
+    func listSpeakersJSON(_ args: ToolArgs = ToolArgs(nil)) throws -> String {
+        let stats = try store.speakerStats()
+        var speakers = try store.allSpeakers()
+        if let unnamed = args.bool("unnamed") {
+            speakers = speakers.filter { ($0.label == nil) == unnamed }
+        }
+        return try MCPJSON.string(speakers.map { SpeakerDTO($0, stats: stats[$0.id], includeStats: true) })
+    }
+
+    func getSpeakerJSON(_ args: ToolArgs) throws -> String {
+        let id = try args.requiredString("id")
+        guard let speaker = try store.speaker(id: id) else {
+            throw MCPToolError("No speaker with id '\(id)'")
+        }
+        let stats = try store.speakerStats()[id]
+        let recordings = try store.recordings(for: id).map {
+            SpeakerAppearanceDTO(
+                recordingId: $0.recording.id, title: $0.recording.title,
+                createdAt: $0.recording.createdAt, segmentCount: $0.segmentCount,
+                speechTimeSec: $0.speechTime, firstAppearanceSec: $0.firstAppearance
+            )
+        }
+        let samples = try store.sampleSegments(speakerId: id, limit: args.int("sampleLimit") ?? 5).map {
+            SpeakerSampleDTO(
+                segmentId: $0.id ?? 0, recordingId: $0.recordingId,
+                startSec: $0.startSec, endSec: $0.endSec, text: $0.text
+            )
+        }
+        return try MCPJSON.string(SpeakerDetailDTO(
+            speaker: SpeakerDTO(speaker, stats: stats, includeStats: true),
+            recordings: recordings, samples: samples
+        ))
+    }
+
+    func suggestMergesJSON(_ args: ToolArgs) throws -> String {
+        let threshold = args.double("minSimilarity").map(Float.init) ?? config.similarityThreshold
+        let stats = try store.speakerStats()
+        let pairs = try store.mergeCandidates(minSimilarity: threshold, limit: args.int("limit") ?? 20)
+        return try MCPJSON.string(pairs.map {
+            MergeCandidateDTO(
+                similarity: $0.similarity,
+                a: SpeakerDTO($0.a, stats: stats[$0.a.id], includeStats: true),
+                b: SpeakerDTO($0.b, stats: stats[$0.b.id], includeStats: true)
+            )
+        })
     }
 
     func listFoldersJSON() throws -> String {
@@ -260,6 +314,15 @@ public final class DiarizeMCPServer: @unchecked Sendable {
         return try MCPJSON.string(Value.object(["ok": true, "id": .string(id)]))
     }
 
+    func moveFolder(_ args: ToolArgs) throws -> String {
+        let id = try args.requiredString("id")
+        let parentId = args.string("parentId")
+        try store.moveFolder(id: id, toParentId: parentId)
+        return try MCPJSON.string(Value.object([
+            "ok": true, "id": .string(id), "parentId": parentId.map(Value.string) ?? .null,
+        ]))
+    }
+
     func deleteFolder(_ args: ToolArgs) throws -> String {
         let id = try args.requiredString("id")
         try store.deleteFolder(id: id)
@@ -354,6 +417,51 @@ public final class DiarizeMCPServer: @unchecked Sendable {
         ]))
     }
 
+    /// Batch reassign: one speaker target, many segments; each recording re-rendered once.
+    func reassignSegments(_ args: ToolArgs) throws -> String {
+        let ids = (args.intArray("segmentIds") ?? []).map(Int64.init)
+        guard !ids.isEmpty else { throw MCPToolError("Missing required non-empty integer array argument 'segmentIds'") }
+        let speakerId = try args.requiredString("speakerId")
+        guard try store.speaker(id: speakerId) != nil else {
+            throw MCPToolError("No speaker with id '\(speakerId)'")
+        }
+        var moved = 0
+        var missing: [Int] = []
+        var recordings = Set<String>()
+        for id in ids {
+            guard let seg = try store.segment(id: id) else { missing.append(Int(id)); continue }
+            try store.reassignSegment(segmentId: id, toSpeakerId: speakerId)
+            recordings.insert(seg.recordingId)
+            moved += 1
+        }
+        for recordingId in recordings { try rerender(recordingId: recordingId) }
+        return try MCPJSON.string(Value.object([
+            "moved": .int(moved),
+            "missing": .array(missing.map(Value.int)),
+            "recordingsRerendered": .int(recordings.count),
+        ]))
+    }
+
+    func setSpeakerNotes(_ args: ToolArgs) throws -> String {
+        let id = try args.requiredString("id")
+        guard try store.speaker(id: id) != nil else { throw MCPToolError("No speaker with id '\(id)'") }
+        let trimmed = args.string("notes")?.trimmingCharacters(in: .whitespacesAndNewlines)
+        try store.updateNotes(id: id, notes: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+        return try MCPJSON.string(Value.object(["ok": true, "id": .string(id)]))
+    }
+
+    /// Delete a speaker that no segment references any more (embeddings cascade).
+    func deleteSpeaker(_ args: ToolArgs) throws -> String {
+        let id = try args.requiredString("id")
+        guard try store.speaker(id: id) != nil else { throw MCPToolError("No speaker with id '\(id)'") }
+        let count = try store.segmentCount(speakerId: id)
+        guard count == 0 else {
+            throw MCPToolError("Speaker '\(id)' still has \(count) segment(s). Use merge_speakers or reassign_segments first.")
+        }
+        try store.deleteSpeaker(id: id)
+        return try MCPJSON.string(Value.object(["ok": true, "id": .string(id)]))
+    }
+
     /// Create a new speaker (e.g. to attribute a voice that isn't a known speaker yet).
     func createSpeaker(_ args: ToolArgs) throws -> String {
         let label = args.string("label")
@@ -388,6 +496,19 @@ public final class DiarizeMCPServer: @unchecked Sendable {
         guard try store.speaker(id: into) != nil else { throw MCPToolError("No speaker with id '\(into)'") }
         // Capture affected recordings before the merge removes `from`.
         let affected = try store.recordings(for: from).map(\.recording.id)
+        if args.bool("dryRun") == true {
+            let stats = try store.speakerStats()
+            let fromSpeaker = try store.speaker(id: from)
+            let intoSpeaker = try store.speaker(id: into)
+            return try MCPJSON.string(Value.object([
+                "dryRun": true,
+                "from": .string(fromSpeaker?.displayName ?? from),
+                "into": .string(intoSpeaker?.displayName ?? into),
+                "segmentsMoved": .int(stats[from]?.segmentCount ?? 0),
+                "recordingsRerendered": .int(affected.count),
+                "mergedSpeakerWouldHaveSegments": .int((stats[from]?.segmentCount ?? 0) + (stats[into]?.segmentCount ?? 0)),
+            ]))
+        }
         try store.mergeSpeakers(from: from, into: into)
         for recordingId in affected {
             try rerender(recordingId: recordingId)

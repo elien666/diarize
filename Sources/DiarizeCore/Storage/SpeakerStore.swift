@@ -190,6 +190,36 @@ public final class SpeakerStore: @unchecked Sendable {
         }
     }
 
+    public enum FolderMoveError: Error, LocalizedError {
+        case folderNotFound(String)
+        case wouldCreateCycle
+
+        public var errorDescription: String? {
+            switch self {
+            case .folderNotFound(let id): return "No folder with id '\(id)'"
+            case .wouldCreateCycle: return "A folder can't be moved into itself or one of its subfolders."
+            }
+        }
+    }
+
+    /// Re-parent a folder (nil = top level). Refuses to move a folder into its own subtree.
+    public func moveFolder(id: String, toParentId: String?) throws {
+        try dbQueue.write { db in
+            guard try RecordingFolder.fetchOne(db, key: id) != nil else { throw FolderMoveError.folderNotFound(id) }
+            var cursor = toParentId
+            var hops = 0
+            while let current = cursor, hops < 64 {
+                if current == id { throw FolderMoveError.wouldCreateCycle }
+                guard let folder = try RecordingFolder.fetchOne(db, key: current) else {
+                    throw FolderMoveError.folderNotFound(current)
+                }
+                cursor = folder.parentId
+                hops += 1
+            }
+            try db.execute(sql: "UPDATE recording_folders SET parentId = ? WHERE id = ?", arguments: [toParentId, id])
+        }
+    }
+
     public func deleteFolder(id: String) throws {
         try dbQueue.write { db in
             _ = try RecordingFolder.deleteOne(db, key: id)

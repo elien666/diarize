@@ -372,7 +372,7 @@ public final class TranscribePipeline {
         createdAt: Date
     ) throws {
         let labels = try currentLabels()
-        let labelFn: (String) -> String = { id in labels[id] ?? "Unknown-\(String(id.suffix(6)))" }
+        let labelFn: (String) -> String = { id in labels[id] ?? Speaker(id: id).displayName }
 
         let md = MarkdownRenderer.render(
             title: title,

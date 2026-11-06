@@ -101,7 +101,9 @@ marked, and the two irreversible ones are called out explicitly.
 
 | Tool | What it returns |
 | --- | --- |
-| `list_speakers` | Every known speaker (id, name, created date). |
+| `list_speakers` | Every known speaker with usage stats (segments, speech time, recordings, last seen) and a `named` flag. `unnamed: true` finds `Unbekannt-…` speakers. |
+| `get_speaker` | One speaker with the recordings they appear in and their longest sample segments (text) — what an agent needs to decide who an unknown voice is. |
+| `suggest_merges` | Speaker pairs with similar voices (cosine similarity ≥ `minSimilarity`, default: your configured threshold), with stats for both. A hint, not proof. |
 | `list_folders` | All folders; nesting is described by each folder's `parentId`. |
 | `list_recordings` | Recordings, **newest first**, with title, state, duration, folder, `processed` flag, and any `errorMessage`. Filterable — see below. |
 | `get_recording` | Full metadata for one recording, including `hasAudio` and segment count. |
@@ -125,6 +127,7 @@ marked, and the two irreversible ones are called out explicitly.
 | `move_recording` | Move a recording into a folder (or to the root). |
 | `create_folder` | Create a folder, optionally nested under a parent. |
 | `rename_folder` | Rename a folder. |
+| `move_folder` | Move a folder (with its contents) under another folder, or to the top level. Refuses to move a folder into its own subtree. |
 | `set_processed` | **Bulk** set or clear the `processed` flag on one or more recordings. |
 | `delete_folder` | ⚠️ Delete a folder. Child folders are deleted; recordings inside are **moved to the root**, not deleted. |
 | `delete_audio` | ⚠️ **Irreversible.** Permanently delete a recording's raw audio while keeping its transcript and speaker data — the same [GDPR audio deletion](privacy.md#deleting-audio-keeping-the-transcript) the app offers. |
@@ -142,7 +145,10 @@ matcher learns and future recordings get matched better.
 | `reassign_segment` | Move a mis-attributed segment (by `id` from `get_transcript`) to the correct, existing speaker. |
 | `create_speaker` | Create a new speaker — e.g. to attribute a voice that isn't a known speaker yet. |
 | `rename_speaker` | Set or clear a speaker's name (e.g. name an `Unbekannt-…` speaker identified from the text). |
-| `merge_speakers` | ⚠️ Merge two identities that are the same person: `from`'s segments + embeddings move to `into`, then `from` is deleted. |
+| `merge_speakers` | ⚠️ Merge two identities that are the same person: `from`'s segments + embeddings move to `into`, then `from` is deleted. `dryRun: true` previews the effect without writing. |
+| `reassign_segments` | Batch version of `reassign_segment`: many segment ids to one speaker, each recording re-rendered once. |
+| `set_speaker_notes` | Set or clear free-text notes on a speaker (e.g. to flag a collective bucket as "ignore"). |
+| `delete_speaker` | ⚠️ Delete a speaker that has no segments left. Refuses otherwise — merge or reassign first. |
 | `split_segment` | Split one segment at a timestamp when it bundled two speakers; the new half can then be reassigned. |
 
 Typical flow: `get_transcript` → notice an `Unbekannt-…` speaker is "Anna" → `rename_speaker`

@@ -279,4 +279,132 @@ import MCP
         #expect(obj["newSegmentId"] as? Int != nil)
         #expect(try store.segments(for: "rec").count == 2)
     }
+
+    // MARK: - Speaker curation tools
+
+    @Test func listSpeakersIncludesStatsAndUnnamedFilter() async throws {
+        let (server, store) = try makeServer()
+        let named = Speaker(label: "Anna"); let anon = Speaker(label: nil)
+        try store.insertSpeaker(named); try store.insertSpeaker(anon)
+        _ = try insertWithSegment(store, recId: "rec", speakerId: named.id)
+
+        let all = try #require(try json(await server.callTool(name: "list_speakers", arguments: nil)) as? [[String: Any]])
+        let annaRow = try #require(all.first { $0["id"] as? String == named.id })
+        #expect(annaRow["segmentCount"] as? Int == 1)
+        #expect(annaRow["recordingCount"] as? Int == 1)
+        #expect(annaRow["named"] as? Bool == true)
+        let anonRow = try #require(all.first { $0["id"] as? String == anon.id })
+        #expect(anonRow["recordingCount"] as? Int == 0)
+
+        let unnamed = try #require(try json(await server.callTool(name: "list_speakers", arguments: ["unnamed": true])) as? [[String: Any]])
+        #expect(unnamed.map { $0["id"] as? String } == [anon.id])
+    }
+
+    @Test func getSpeakerReturnsRecordingsAndSamples() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: nil); try store.insertSpeaker(a)
+        _ = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(name: "get_speaker", arguments: ["id": .string(a.id)])
+        #expect(result.isError != true)
+        let obj = try #require(try json(result) as? [String: Any])
+        let recs = try #require(obj["recordings"] as? [[String: Any]])
+        #expect(recs.first?["recordingId"] as? String == "rec")
+        let samples = try #require(obj["samples"] as? [[String: Any]])
+        #expect(samples.first?["text"] as? String == "hello there")
+    }
+
+    @Test func suggestMergesFindsSimilarVoicesAndSkipsUnusedSpeakers() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "Bjørn"); let b = Speaker(label: "BGD"); let orphan = Speaker(label: "Orphan")
+        for s in [a, b, orphan] { try store.insertSpeaker(s) }
+        _ = try insertWithSegment(store, recId: "r1", speakerId: a.id)   // embedding [1, 0]
+        _ = try insertWithSegment(store, recId: "r2", speakerId: b.id)   // embedding [1, 0]
+        try store.insertEmbedding(SpeakerEmbedding(speakerId: orphan.id, vector: [1, 0])) // identical but unused
+
+        let result = await server.callTool(name: "suggest_merges", arguments: ["minSimilarity": 0.9])
+        let pairs = try #require(try json(result) as? [[String: Any]])
+        #expect(pairs.count == 1)
+        let ids = Set([
+            (pairs[0]["a"] as? [String: Any])?["id"] as? String,
+            (pairs[0]["b"] as? [String: Any])?["id"] as? String,
+        ])
+        #expect(ids == [a.id, b.id])
+    }
+
+    @Test func mergeDryRunChangesNothing() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); let b = Speaker(label: "B")
+        try store.insertSpeaker(a); try store.insertSpeaker(b)
+        _ = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(
+            name: "merge_speakers", arguments: ["from": .string(a.id), "into": .string(b.id), "dryRun": true])
+        let obj = try #require(try json(result) as? [String: Any])
+        #expect(obj["dryRun"] as? Bool == true)
+        #expect(obj["segmentsMoved"] as? Int == 1)
+        #expect(try store.speaker(id: a.id) != nil)
+        #expect(try store.segmentCount(speakerId: a.id) == 1)
+    }
+
+    @Test func deleteSpeakerRefusesWhenSegmentsRemain() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: nil); let orphan = Speaker(label: nil)
+        try store.insertSpeaker(a); try store.insertSpeaker(orphan)
+        _ = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let refused = await server.callTool(name: "delete_speaker", arguments: ["id": .string(a.id)])
+        #expect(refused.isError == true)
+        #expect(try store.speaker(id: a.id) != nil)
+
+        let ok = await server.callTool(name: "delete_speaker", arguments: ["id": .string(orphan.id)])
+        #expect(ok.isError != true)
+        #expect(try store.speaker(id: orphan.id) == nil)
+    }
+
+    @Test func setSpeakerNotesRoundTrips() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: nil); try store.insertSpeaker(a)
+        _ = await server.callTool(name: "set_speaker_notes", arguments: ["id": .string(a.id), "notes": "demo bucket"])
+        #expect(try store.speaker(id: a.id)?.notes == "demo bucket")
+        _ = await server.callTool(name: "set_speaker_notes", arguments: ["id": .string(a.id), "notes": ""])
+        #expect(try store.speaker(id: a.id)?.notes == nil)
+    }
+
+    @Test func reassignSegmentsBatchReportsMissing() async throws {
+        let (server, store) = try makeServer()
+        let a = Speaker(label: "A"); let b = Speaker(label: "B")
+        try store.insertSpeaker(a); try store.insertSpeaker(b)
+        let segId = try insertWithSegment(store, recId: "rec", speakerId: a.id)
+
+        let result = await server.callTool(
+            name: "reassign_segments",
+            arguments: ["segmentIds": .array([.int(Int(segId)), .int(99999)]), "speakerId": .string(b.id)])
+        let obj = try #require(try json(result) as? [String: Any])
+        #expect(obj["moved"] as? Int == 1)
+        #expect(obj["missing"] as? [Int] == [99999])
+        #expect(try store.segment(id: segId)?.speakerId == b.id)
+    }
+
+    @Test func moveFolderReparentsAndRejectsCycles() async throws {
+        let (server, store) = try makeServer()
+        let a = try store.insertFolder(RecordingFolder(name: "A"))
+        let b = try store.insertFolder(RecordingFolder(name: "B", parentId: a.id))
+        let c = try store.insertFolder(RecordingFolder(name: "C"))
+
+        let ok = await server.callTool(name: "move_folder", arguments: ["id": .string(c.id), "parentId": .string(b.id)])
+        #expect(ok.isError != true)
+        #expect(try store.allFolders().first { $0.id == c.id }?.parentId == b.id)
+
+        // A cannot go below its own descendant C.
+        let cycle = await server.callTool(name: "move_folder", arguments: ["id": .string(a.id), "parentId": .string(c.id)])
+        #expect(cycle.isError == true)
+        let selfMove = await server.callTool(name: "move_folder", arguments: ["id": .string(a.id), "parentId": .string(a.id)])
+        #expect(selfMove.isError == true)
+
+        // null parent = top level
+        let root = await server.callTool(name: "move_folder", arguments: ["id": .string(b.id), "parentId": .null])
+        #expect(root.isError != true)
+        #expect(try store.allFolders().first { $0.id == b.id }?.parentId == nil)
+    }
 }

@@ -27,8 +27,28 @@ extension DiarizeMCPServer {
             // MARK: Read
             Tool(
                 name: "list_speakers",
-                description: "List all known speakers.",
-                inputSchema: schema(),
+                description: "List known speakers with usage stats: segmentCount, speechTimeSec, recordingCount, lastSeen and a 'named' flag. Use unnamed=true to find 'Unbekannt-…' speakers that still need a name. Speakers with recordingCount 0 are orphans and can be removed with delete_speaker.",
+                inputSchema: schema(properties: [
+                    "unnamed": prop("boolean", "true = only speakers without a name; false = only named; omit = all."),
+                ]),
+                annotations: readOnly
+            ),
+            Tool(
+                name: "get_speaker",
+                description: "Everything needed to identify one speaker: stats, the recordings they appear in (newest first, with per-recording speech time and first appearance) and their longest sample segments with text. Use it to decide who an 'Unbekannt-…' speaker is before calling rename_speaker.",
+                inputSchema: schema(properties: [
+                    "id": prop("string", "Speaker id."),
+                    "sampleLimit": prop("integer", "Max sample segments (default 5)."),
+                ], required: ["id"]),
+                annotations: readOnly
+            ),
+            Tool(
+                name: "suggest_merges",
+                description: "Pairs of speakers whose voices are similar enough to be the same person, most similar first, with stats for both. A suggestion is not proof: check with get_speaker (and merge_speakers dryRun) before merging, a wrong merge degrades future voice matching.",
+                inputSchema: schema(properties: [
+                    "minSimilarity": prop("number", "Cosine similarity threshold 0-1 (default: the app's configured speaker threshold)."),
+                    "limit": prop("integer", "Max pairs (default 20)."),
+                ]),
                 annotations: readOnly
             ),
             Tool(
@@ -106,6 +126,15 @@ extension DiarizeMCPServer {
                 annotations: safeWrite
             ),
             Tool(
+                name: "move_folder",
+                description: "Move a folder (with everything in it) under another folder, or to the top level when parentId is omitted or null. Refuses to move a folder into itself or one of its own subfolders.",
+                inputSchema: schema(properties: [
+                    "id": prop("string", "Folder id to move."),
+                    "parentId": prop("string", "New parent folder id, or null for top level."),
+                ], required: ["id"]),
+                annotations: safeWrite
+            ),
+            Tool(
                 name: "delete_folder",
                 description: "Delete a folder. Child folders are deleted; recordings inside are moved to root (not deleted).",
                 inputSchema: schema(properties: ["id": prop("string", "Folder id.")], required: ["id"]),
@@ -153,6 +182,30 @@ extension DiarizeMCPServer {
                 annotations: safeWrite
             ),
             Tool(
+                name: "reassign_segments",
+                description: "Batch version of reassign_segment: move many segments (ids from get_transcript) to one existing speaker in a single call. Each affected recording is re-rendered once. Unknown segment ids are reported in 'missing' and skipped.",
+                inputSchema: schema(properties: [
+                    "segmentIds": ["type": "array", "items": ["type": "integer"], "description": "Segment ids."],
+                    "speakerId": prop("string", "Target speaker id (must exist)."),
+                ], required: ["segmentIds", "speakerId"]),
+                annotations: safeWrite
+            ),
+            Tool(
+                name: "set_speaker_notes",
+                description: "Set or clear free-text notes on a speaker, e.g. 'collective bucket for demo-day video voices, ignore' or 'probably the organizer of the 9:14 audio test'. Notes are shown by list_speakers and get_speaker. They are lost when the speaker is merged away, so copy them first if needed.",
+                inputSchema: schema(properties: [
+                    "id": prop("string", "Speaker id."),
+                    "notes": prop("string", "Notes text, or empty/null to clear."),
+                ], required: ["id"]),
+                annotations: safeWrite
+            ),
+            Tool(
+                name: "delete_speaker",
+                description: "Delete a speaker that has no segments left (an orphan, or an empty bucket after reassigning). Refuses if any segment still references it: merge_speakers or reassign_segments first. Also removes its voice embeddings. Irreversible.",
+                inputSchema: schema(properties: ["id": prop("string", "Speaker id.")], required: ["id"]),
+                annotations: destructive
+            ),
+            Tool(
                 name: "create_speaker",
                 description: "Create a new speaker, e.g. to attribute a voice that isn't a known speaker yet. Returns the new speaker. Reassign segments to it with reassign_segment.",
                 inputSchema: schema(properties: [
@@ -171,10 +224,11 @@ extension DiarizeMCPServer {
             ),
             Tool(
                 name: "merge_speakers",
-                description: "Merge two speaker identities that are the same person: all of 'from''s segments and voice embeddings move to 'into', then 'from' is deleted. Re-renders the affected recordings.",
+                description: "Merge two speaker identities that are the same person: all of 'from''s segments and voice embeddings move to 'into', then 'from' is deleted. Re-renders the affected recordings. Pass dryRun=true to only preview what would change (nothing is written).",
                 inputSchema: schema(properties: [
                     "from": prop("string", "Speaker id to merge away (deleted)."),
                     "into": prop("string", "Speaker id to keep."),
+                    "dryRun": prop("boolean", "true = preview only: returns segment/recording counts and both names, changes nothing."),
                 ], required: ["from", "into"]),
                 annotations: destructive
             ),
