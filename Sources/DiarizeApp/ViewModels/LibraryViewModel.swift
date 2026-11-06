@@ -3,6 +3,26 @@ import Foundation
 import DiarizeCore
 import UniformTypeIdentifiers
 
+enum SidebarDestination: Hashable {
+    case allRecordings
+    case unfiled
+    case folder(String)
+    case speakers
+    case agents
+}
+
+struct NewFolderRequest: Identifiable {
+    let id = UUID()
+    let parentId: String?
+}
+
+/// `needsAttention` = failed analysis or not yet marked processed.
+enum RecordingFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case needsAttention = "Needs attention"
+    var id: String { rawValue }
+}
+
 @MainActor
 final class LibraryViewModel: ObservableObject {
     @Published var recordings: [Recording] = []
@@ -10,7 +30,12 @@ final class LibraryViewModel: ObservableObject {
     @Published var folders: [RecordingFolder] = []
     @Published var selectedRecordingId: String?
     @Published var selectedSpeakerId: String?
-    @Published var sidebarSection: SidebarSection = .recordings
+    /// What the sidebar currently points at: a recording scope or a full-page destination.
+    @Published var destination: SidebarDestination = .allRecordings
+    /// Narrows the recording list inside the current scope.
+    @Published var recordingFilter: RecordingFilter = .all
+    /// Per-speaker usage numbers (segments, speech time, recordings, last seen).
+    @Published var speakerStats: [String: SpeakerStats] = [:]
     @Published var importInProgress: Bool = false
     @Published var statusMessage: String = ""
     @Published var errorAlert: ErrorAlert?
@@ -37,10 +62,6 @@ final class LibraryViewModel: ObservableObject {
     let store: SpeakerStore
     let searchService: SearchService
 
-    enum SidebarSection: Hashable {
-        case recordings
-        case speakers
-    }
 
     init() {
         let loadedConfig = AppConfigLoader.load()
@@ -53,6 +74,7 @@ final class LibraryViewModel: ObservableObject {
         lastDataVersion = try? store.dataVersion()
         startWatchingExternalChanges()
     }
+
 
     // MARK: - External (cross-process) change detection
 
@@ -130,14 +152,94 @@ final class LibraryViewModel: ObservableObject {
         recordings = (try? store.allRecordings()) ?? []
         speakers = (try? store.allSpeakers()) ?? []
         folders = (try? store.allFolders()) ?? []
+        speakerStats = (try? store.speakerStats()) ?? [:]
+    }
+
+    // MARK: - Scope + filter
+
+    /// The folder itself plus every folder below it.
+    func folderIdsIncludingDescendants(of id: String) -> Set<String> {
+        var result: Set<String> = [id]
+        var queue = [id]
+        while let current = queue.popLast() {
+            for child in folders where child.parentId == current && result.insert(child.id).inserted {
+                queue.append(child.id)
+            }
+        }
+        return result
+    }
+
+    /// "Clients › Acme" style path for a folder, nil for unfiled.
+    func folderPath(_ id: String?) -> String? {
+        guard var current = id.flatMap({ fid in folders.first { $0.id == fid } }) else { return nil }
+        var names = [current.name]
+        var guardCount = 0
+        while let parentId = current.parentId, let parent = folders.first(where: { $0.id == parentId }), guardCount < 32 {
+            names.insert(parent.name, at: 0)
+            current = parent
+            guardCount += 1
+        }
+        return names.joined(separator: " › ")
+    }
+
+    func scopeContains(_ recording: Recording) -> Bool {
+        switch destination {
+        case .allRecordings: return true
+        case .unfiled: return recording.folderId == nil
+        case .folder(let id):
+            guard let fid = recording.folderId else { return false }
+            return folderIdsIncludingDescendants(of: id).contains(fid)
+        case .speakers, .agents: return false
+        }
+    }
+
+    /// Recordings in the current scope (folders include their subfolders), newest first.
+    func recordingsInScope(filter: RecordingFilter, matching text: String = "") -> [Recording] {
+        let needle = text.trimmingCharacters(in: .whitespaces).lowercased()
+        let allowed: Set<String>? = {
+            if case .folder(let id) = destination { return folderIdsIncludingDescendants(of: id) }
+            return nil
+        }()
+        return recordings.filter { rec in
+            switch destination {
+            case .allRecordings: break
+            case .unfiled: if rec.folderId != nil { return false }
+            case .folder:
+                guard let fid = rec.folderId, allowed?.contains(fid) == true else { return false }
+            case .speakers, .agents: return false
+            }
+            switch filter {
+            case .all: break
+            case .needsAttention:
+                if rec.processed && rec.processingState != .failed { return false }
+            }
+            if !needle.isEmpty, !(rec.title ?? "Recording").lowercased().contains(needle) { return false }
+            return true
+        }
+        .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func recordingCount(in destination: SidebarDestination) -> Int {
+        switch destination {
+        case .allRecordings: return recordings.count
+        case .unfiled: return recordings.filter { $0.folderId == nil }.count
+        case .folder(let id):
+            let ids = folderIdsIncludingDescendants(of: id)
+            return recordings.filter { $0.folderId.map(ids.contains) ?? false }.count
+        case .speakers: return speakers.count
+        case .agents: return 0
+        }
     }
 
     func speakerLabel(for id: String?) -> String {
         guard let id else { return "—" }
-        if let s = speakers.first(where: { $0.id == id }), let label = s.label {
-            return label
-        }
-        return "Unknown-\(String(id.suffix(6)))"
+        if let s = speakers.first(where: { $0.id == id }) { return s.displayName }
+        return Speaker(id: id).displayName
+    }
+
+    /// The speaker's longest segments, the best material to recognize a voice by its words.
+    func sampleSegments(for speakerId: String, limit: Int = 3) -> [RecordingSegment] {
+        (try? store.sampleSegments(speakerId: speakerId, limit: limit)) ?? []
     }
 
     func segmentCount(speakerId: String) -> Int { (try? store.segmentCount(speakerId: speakerId)) ?? 0 }
@@ -152,7 +254,14 @@ final class LibraryViewModel: ObservableObject {
     }
 
     func openRecording(_ recordingId: String, jumpToSec: Double? = nil) {
-        sidebarSection = .recordings
+        if let rec = recordings.first(where: { $0.id == recordingId }) {
+            if !scopeContains(rec) { destination = .allRecordings }
+            if !recordingsInScope(filter: recordingFilter).contains(where: { $0.id == recordingId }) {
+                recordingFilter = .all
+            }
+        } else {
+            destination = .allRecordings
+        }
         selectedRecordingId = recordingId
         if let jumpToSec {
             pendingJumpSec = jumpToSec
@@ -160,6 +269,11 @@ final class LibraryViewModel: ObservableObject {
     }
 
     @Published var pendingJumpSec: Double?
+
+    func openSpeaker(_ speakerId: String) {
+        selectedSpeakerId = speakerId
+        destination = .speakers
+    }
 
     // MARK: - Live recording state
 
@@ -540,11 +654,30 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
+    /// Folders whose children are shown in the sidebar tree.
+    @Published var expandedFolders: Set<String> = []
+
+    /// Set to open the "new folder" sheet (optionally under a parent folder).
+    @Published var newFolderRequest: NewFolderRequest?
+
+    func requestNewFolder(parentId: String? = nil) {
+        newFolderRequest = NewFolderRequest(parentId: parentId)
+    }
+
     @discardableResult
     func createFolder(name: String, parentId: String? = nil) -> RecordingFolder? {
         let folder = RecordingFolder(name: name, parentId: parentId)
         let inserted = try? store.insertFolder(folder)
         reload()
+        if let inserted {
+            // Make sure the new row is visible: open every ancestor.
+            var ancestor = parentId
+            while let id = ancestor {
+                expandedFolders.insert(id)
+                ancestor = folders.first { $0.id == id }?.parentId
+            }
+            destination = .folder(inserted.id)
+        }
         return inserted
     }
 
@@ -555,7 +688,21 @@ final class LibraryViewModel: ObservableObject {
         reload()
     }
 
+    /// Re-parent a folder by drag and drop (nil = top level). Ignores no-op and cyclic moves.
+    func moveFolder(_ folderId: String, toParent parentId: String?) {
+        guard folderId != parentId,
+              folders.first(where: { $0.id == folderId })?.parentId != parentId else { return }
+        if let parentId, folderIdsIncludingDescendants(of: folderId).contains(parentId) { return }
+        do { try store.moveFolder(id: folderId, toParentId: parentId) } catch { return }
+        if let parentId { expandedFolders.insert(parentId) }
+        reload()
+    }
+
     func deleteFolder(_ folderId: String) {
+        if case .folder(let current) = destination,
+           folderIdsIncludingDescendants(of: folderId).contains(current) {
+            destination = .allRecordings
+        }
         try? store.deleteFolder(id: folderId)
         reload()
     }

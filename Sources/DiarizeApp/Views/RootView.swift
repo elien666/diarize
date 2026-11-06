@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import DiarizeCore
 
 struct RootView: View {
@@ -8,64 +9,55 @@ struct RootView: View {
     @EnvironmentObject var cleanup: AudioCleanupController
     @State private var searchQuery: String = ""
     @State private var showingSearch = false
+    @State private var dropTargeted = false
 
     var body: some View {
-        Group {
-            if autoMode.isActive {
-                AutoModeView()
-            } else {
-                libraryView
+        libraryView
+            .onAppear {
+                autoMode.attach(library: library, permissions: permissions)
+                cleanup.attach(library: library)
+                cleanup.start()
             }
-        }
-        .onAppear {
-            autoMode.attach(library: library, permissions: permissions)
-            cleanup.attach(library: library)
-            cleanup.start()
-        }
-        .sheet(isPresented: Binding(
-            get: { !cleanup.pendingCleanup.isEmpty },
-            set: { if !$0 { cleanup.dismiss() } }
-        )) {
-            AudioCleanupSheet()
-        }
+            .sheet(item: $library.newFolderRequest) { request in
+                NewFolderSheet(request: request)
+            }
+            .sheet(isPresented: Binding(
+                get: { !cleanup.pendingCleanup.isEmpty },
+                set: { if !$0 { cleanup.dismiss() } }
+            )) {
+                AudioCleanupSheet()
+            }
     }
 
     private var libraryView: some View {
         VStack(spacing: 0) {
             NavigationSplitView {
                 SidebarView()
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+                    .navigationSplitViewColumnWidth(min: 230, ideal: 260)
             } detail: {
                 DetailRouter()
             }
-            .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search …")
+            .toolbar {
+                // In the toolbar, not the sidebar, so recording stays reachable with the sidebar hidden.
+                ToolbarItemGroup(placement: .navigation) {
+                    CaptureControls()
+                    AutoModeToggle()
+                }
+                // Flexible item that fills the gap, so the options button sits at the right end,
+                // next to the search field.
+                ToolbarItem(placement: .principal) {
+                    HStack {
+                        Spacer(minLength: 0)
+                        RecordingOptionsButton()
+                    }
+                    .padding(.trailing, 44) // keep the button inside the list column, off the divider
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .searchable(text: $searchQuery, placement: .toolbar, prompt: "Search transcripts")
             .onSubmit(of: .search) { showingSearch = !searchQuery.isEmpty }
             .sheet(isPresented: $showingSearch) {
                 SearchSheet(query: searchQuery, isPresented: $showingSearch)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button {
-                        library.openImportDialog()
-                    } label: {
-                        Label("Add Recording", systemImage: "plus")
-                    }
-                    .disabled(library.importInProgress || library.isRecording)
-                }
-                ToolbarItem(placement: .navigation) {
-                    RecordToolbarControl()
-                }
-                ToolbarItem(placement: .automatic) {
-                    Button {
-                        autoMode.enter()
-                    } label: {
-                        Label("Auto Recording Mode", systemImage: "wand.and.stars")
-                    }
-                    .disabled(!permissions.allGranted)
-                    .help(permissions.allGranted
-                        ? "Automatically record when a call is detected"
-                        : "Grant Microphone and Screen Recording permissions first")
-                }
             }
             .onChange(of: searchQuery) { _, new in
                 if new.isEmpty { showingSearch = false }
@@ -77,9 +69,43 @@ struct RootView: View {
                     dismissButton: .default(Text("OK"))
                 )
             }
+            .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+                importDropped(providers)
+            }
+            .overlay {
+                if dropTargeted {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                        .background(Color.accentColor.opacity(0.06))
+                        .overlay {
+                            Label("Drop audio to transcribe", systemImage: "square.and.arrow.down")
+                                .font(.title3)
+                                .padding(16)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .padding(6)
+                        .allowsHitTesting(false)
+                }
+            }
 
             StatusBar()
         }
+    }
+
+    /// Import audio dropped onto the window. The import is a rare case, so it has no
+    /// toolbar button; dropping a file or File > Open Recording … (⌘O) is enough.
+    private func importDropped(_ providers: [NSItemProvider]) -> Bool {
+        guard !library.importInProgress, !library.isRecording,
+              let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier("public.file-url") })
+        else { return false }
+        provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
+            guard let data = item as? Data,
+                  let url = URL(dataRepresentation: data, relativeTo: nil),
+                  UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio) == true
+            else { return }
+            Task { @MainActor in library.transcribe(audioURL: url, title: nil) }
+        }
+        return true
     }
 }
 
@@ -167,21 +193,28 @@ struct DetailRouter: View {
     @EnvironmentObject var library: LibraryViewModel
 
     var body: some View {
-        switch library.sidebarSection {
-        case .recordings:
-            if let id = library.selectedRecordingId,
-               let recording = library.recordings.first(where: { $0.id == id }) {
-                RecordingDetailView(recording: recording)
-            } else {
-                EmptyDetail(text: "Select a recording from the sidebar.")
+        switch library.destination {
+        case .allRecordings, .unfiled, .folder:
+            HSplitView {
+                RecordingListView()
+                    .frame(minWidth: 260, idealWidth: 300, maxWidth: 420)
+                recordingDetail
+                    .frame(minWidth: 420, maxWidth: .infinity)
             }
         case .speakers:
-            if let id = library.selectedSpeakerId,
-               let speaker = library.speakers.first(where: { $0.id == id }) {
-                SpeakerDetailView(speaker: speaker)
-            } else {
-                EmptyDetail(text: "Select a speaker from the sidebar.")
-            }
+            SpeakersView()
+        case .agents:
+            AgentsView()
+        }
+    }
+
+    @ViewBuilder
+    private var recordingDetail: some View {
+        if let id = library.selectedRecordingId,
+           let recording = library.recordings.first(where: { $0.id == id }) {
+            RecordingDetailView(recording: recording)
+        } else {
+            EmptyDetail(text: "Select a recording from the list.")
         }
     }
 }

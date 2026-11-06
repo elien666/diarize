@@ -12,6 +12,8 @@ struct RecordingDetailView: View {
     @State private var pendingMerge: MergeRequest?
     @State private var pendingDelete = false
     @State private var pendingAudioDelete = false
+    @State private var chipRenameId: String?
+    @State private var chipRenameDraft = ""
 
     struct MergeRequest: Identifiable {
         let id = UUID()
@@ -101,75 +103,200 @@ struct RecordingDetailView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(recording.title ?? "Recording")
                     .font(.title2.weight(.semibold))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 StateBadge(state: recording.processingState)
             }
-            HStack(spacing: 12) {
-                Text(recording.createdAt, format: .dateTime.year().month().day().hour().minute())
-                Text("·")
-                Text(formatDuration(recording.durationSec))
-                if recording.processingState == .done {
-                    Text("·")
-                    Text(recording.language.uppercased())
-                    Text("·")
-                    Text("\(uniqueSpeakers().count) speakers")
-                }
-                Spacer()
-                if recording.processingState == .done {
-                    Button {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
-                    } label: {
-                        Image(systemName: "doc.text")
-                    }
-                    .controlSize(.small)
-                    .help("Open")
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording.transcriptMd)])
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .controlSize(.small)
-                    .help("Reveal in Finder")
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(recording.transcriptMd, forType: .string)
-                    } label: {
-                        Image(systemName: "doc.on.clipboard")
-                    }
-                    .controlSize(.small)
-                    .help("Copy Path")
-                    Button {
-                        library.retryAnalysis(recordingId: recording.id)
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .controlSize(.small)
-                    .help("Re-analyze")
-                    if recording.hasAudio {
-                        Button {
-                            pendingAudioDelete = true
-                        } label: {
-                            Image(systemName: "waveform.slash")
-                        }
-                        .controlSize(.small)
-                        .help("Delete Audio (keep transcript)")
-                    }
-                    Button(role: .destructive) {
-                        pendingDelete = true
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .controlSize(.small)
-                    .help("Delete")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(metaLine)
+                    .lineLimit(1)
+                if let path = library.folderPath(recording.folderId) {
+                    Label(path, systemImage: "folder")
+                        .lineLimit(1)
                 }
             }
-            .font(.caption)
+            .font(.callout)
             .foregroundStyle(.secondary)
+
+            if recording.processingState == .done {
+                actions
+                if !speakerSummaries.isEmpty { speakerChips }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
+    }
+
+    private var metaLine: String {
+        var parts = [
+            recording.createdAt.formatted(date: .abbreviated, time: .shortened),
+            formatDuration(recording.durationSec),
+        ]
+        if recording.processingState == .done { parts.append(recording.language.uppercased()) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// One main action, export in a menu, the rarely used and destructive ones under "More".
+    private var actions: some View {
+        HStack(spacing: 8) {
+            Button {
+                NSWorkspace.shared.open(URL(fileURLWithPath: recording.transcriptMd))
+            } label: {
+                Label("Open Transcript", systemImage: "doc.text")
+            }
+            .buttonStyle(.borderedProminent)
+            .help("Open the Markdown transcript in your default editor")
+
+            Menu {
+                Button {
+                    if let text = try? String(contentsOfFile: recording.transcriptMd, encoding: .utf8) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                } label: {
+                    Label("Copy Transcript Text", systemImage: "doc.on.doc")
+                }
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(recording.transcriptMd, forType: .string)
+                } label: {
+                    Label("Copy File Path", systemImage: "link")
+                }
+                Divider()
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: recording.transcriptMd)])
+                } label: {
+                    Label("Show in Finder", systemImage: "folder")
+                }
+            } label: {
+                Label("Share", systemImage: "square.and.arrow.up")
+            }
+            .menuStyle(.button)
+            .fixedSize()
+
+            Menu {
+                Button {
+                    library.retryAnalysis(recordingId: recording.id)
+                } label: {
+                    Label("Re-analyze", systemImage: "arrow.clockwise")
+                }
+                .disabled(!recording.hasAudio)
+                Divider()
+                if recording.hasAudio {
+                    Button(role: .destructive) {
+                        pendingAudioDelete = true
+                    } label: {
+                        Label("Delete Audio, Keep Transcript …", systemImage: "waveform.slash")
+                    }
+                }
+                Button(role: .destructive) {
+                    pendingDelete = true
+                } label: {
+                    Label("Delete Recording …", systemImage: "trash")
+                }
+            } label: {
+                Label("More", systemImage: "ellipsis")
+            }
+            .menuStyle(.button)
+            .fixedSize()
+        }
+        .controlSize(.regular)
+    }
+
+    // MARK: - Speaker chips
+
+    private struct SpeakerSummary: Identifiable {
+        let id: String
+        let seconds: Double
+        let share: Double
+    }
+
+    private var speakerSummaries: [SpeakerSummary] {
+        var seconds: [String: Double] = [:]
+        for seg in segments {
+            guard let id = seg.speakerId else { continue }
+            seconds[id, default: 0] += max(0, seg.endSec - seg.startSec)
+        }
+        let total = seconds.values.reduce(0, +)
+        guard total > 0 else { return [] }
+        return seconds
+            .map { SpeakerSummary(id: $0.key, seconds: $0.value, share: $0.value / total) }
+            .sorted { $0.seconds > $1.seconds }
+    }
+
+    private var speakerChips: some View {
+        FlowLayout(spacing: 6) {
+            Text("Speakers")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 2)
+            ForEach(speakerSummaries) { summary in
+                speakerChip(summary)
+            }
+        }
+    }
+
+    private func speakerChip(_ summary: SpeakerSummary) -> some View {
+        let speaker = library.speakers.first { $0.id == summary.id }
+        let named = speaker?.label != nil
+        return Button {
+            chipRenameDraft = speaker?.label ?? ""
+            chipRenameId = summary.id
+        } label: {
+            HStack(spacing: 5) {
+                if named {
+                    Circle().fill(SpeakerColors.color(for: summary.id)).frame(width: 8, height: 8)
+                } else {
+                    Image(systemName: "questionmark.circle.fill").foregroundStyle(.orange)
+                }
+                Text(library.speakerLabel(for: summary.id))
+                Text("\(Int((summary.share * 100).rounded()))%")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(named ? Color.clear : Color.orange.opacity(0.12), in: Capsule())
+            .overlay(Capsule().strokeBorder(named ? Color.secondary.opacity(0.4) : Color.orange.opacity(0.6)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(named ? "Rename or open this speaker" : "Unnamed speaker: click to name it")
+        .popover(isPresented: Binding(
+            get: { chipRenameId == summary.id },
+            set: { if !$0 { chipRenameId = nil } }
+        ), arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(named ? "Rename speaker" : "Name this speaker").font(.headline)
+                TextField("Name", text: $chipRenameDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+                    .onSubmit { commitChipRename() }
+                HStack {
+                    Button("Open Speaker") {
+                        chipRenameId = nil
+                        library.openSpeaker(summary.id)
+                    }
+                    Spacer()
+                    Button("Cancel") { chipRenameId = nil }
+                    Button("Save") { commitChipRename() }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func commitChipRename() {
+        if let id = chipRenameId {
+            library.updateLabel(speakerId: id, name: chipRenameDraft)
+        }
+        chipRenameId = nil
+        reload()
     }
 
     // MARK: - Control bar (player OR live recording controls)
@@ -252,7 +379,6 @@ struct RecordingDetailView: View {
                     Label("Stop & Analyze", systemImage: "stop.circle.fill")
                         .foregroundStyle(.red)
                 }
-                .keyboardShortcut("s", modifiers: .command)
             }
             // Per-device live level meters. Isolated TimelineView — see RecordingLevels.
             if let meter = library.recordingMeter {
@@ -266,8 +392,8 @@ struct RecordingDetailView: View {
     private var playerBar: some View {
         HStack(spacing: 12) {
             Button { player.togglePlay() } label: {
-                Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title3)
+                Image(systemName: player.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 28))
             }
             .buttonStyle(.borderless)
             .disabled(player.duration <= 0)
@@ -278,14 +404,34 @@ struct RecordingDetailView: View {
             ), in: 0...max(player.duration, 1)) {
                 Text("Time")
             }
+            .labelsHidden()
             .disabled(player.duration <= 0)
             Text("\(formatDuration(player.currentTime)) / \(formatDuration(player.duration))")
                 .monospacedDigit()
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
+            Menu {
+                ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
+                    Button {
+                        player.setRate(Float(speed))
+                    } label: {
+                        if Float(speed) == player.rate {
+                            Label(Self.speedLabel(speed), systemImage: "checkmark")
+                        } else {
+                            Text(Self.speedLabel(speed))
+                        }
+                    }
+                }
+            } label: {
+                Text(Self.speedLabel(Double(player.rate)))
+                    .monospacedDigit()
+            }
+            .menuStyle(.button)
+            .fixedSize()
+            .help("Playback speed")
         }
         .padding(.horizontal)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Content
@@ -474,6 +620,10 @@ struct RecordingDetailView: View {
 
     // MARK: - Helpers
 
+    private static func speedLabel(_ speed: Double) -> String {
+        speed == speed.rounded() ? "\(Int(speed))×" : String(format: "%g×", speed)
+    }
+
     private func consumePendingJump() {
         guard let target = library.pendingJumpSec else { return }
         loadAudioIfNeeded()
@@ -517,6 +667,39 @@ struct RecordingDetailView: View {
         let m = (total % 3600) / 60
         let s = total % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+}
+
+/// Minimal wrapping row layout for chips.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, width: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > maxWidth, x > 0 {
+                y += rowHeight + spacing; x = 0; rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            width = max(width, x - spacing)
+        }
+        return CGSize(width: width, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                y += rowHeight + spacing; x = bounds.minX; rowHeight = 0
+            }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }
 
@@ -626,7 +809,7 @@ struct SegmentRow: View {
                     Button {
                         onAssignSpeaker(sp.id)
                     } label: {
-                        Label(sp.label ?? "Unknown-\(String(sp.id.suffix(6)))",
+                        Label(sp.displayName,
                               systemImage: sp.id == segment.speakerId ? "checkmark" : "circle.fill")
                     }
                 }

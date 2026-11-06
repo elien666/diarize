@@ -7,6 +7,8 @@ final class AudioPlayer: ObservableObject {
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
     @Published var isPlaying: Bool = false
+    /// Playback speed, kept across loads.
+    @Published var rate: Float = 1.0
 
     private(set) var loadedURL: URL?
     private var player: AVPlayer?
@@ -42,8 +44,16 @@ final class AudioPlayer: ObservableObject {
     }
 
     func play() {
+        player?.defaultRate = rate
         player?.play()
+        player?.rate = rate
         isPlaying = true
+    }
+
+    func setRate(_ newRate: Float) {
+        rate = newRate
+        player?.defaultRate = newRate
+        if isPlaying { player?.rate = newRate }
     }
 
     func pause() {

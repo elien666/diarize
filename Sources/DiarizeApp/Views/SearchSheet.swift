@@ -58,8 +58,7 @@ struct SearchSheet: View {
     }
 
     private func jump(to hit: SearchHit) {
-        library.sidebarSection = .recordings
-        library.selectedRecordingId = hit.recordingId
+        library.openRecording(hit.recordingId)
         isPresented = false
     }
 

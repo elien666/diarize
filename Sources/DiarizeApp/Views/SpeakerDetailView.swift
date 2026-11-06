@@ -18,6 +18,7 @@ struct SpeakerDetailView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    sampleQuotes
                     metadataList
                     similaritySection
                     appearancesList
@@ -35,7 +36,7 @@ struct SpeakerDetailView: View {
                 .fill(SpeakerColors.color(for: speaker.id))
                 .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(speaker.label ?? "Unnamed-\(String(speaker.id.suffix(6)))")
+                Text(speaker.displayName)
                     .font(.title2.weight(.semibold))
                 Text(speaker.id)
                     .font(.caption)
@@ -49,40 +50,89 @@ struct SpeakerDetailView: View {
 
     private var actionsBar: some View {
         let segCount = library.segmentCount(speakerId: speaker.id)
-        return HStack(spacing: 8) {
-            TextField("Speaker name", text: $newLabel)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 220)
-            Button("Save") {
-                library.updateLabel(speakerId: speaker.id, name: newLabel)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("Name this speaker", text: $newLabel)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { library.updateLabel(speakerId: speaker.id, name: newLabel) }
+                Button("Save") {
+                    library.updateLabel(speakerId: speaker.id, name: newLabel)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(newLabel.trimmingCharacters(in: .whitespaces) == (speaker.label ?? ""))
             }
-            .keyboardShortcut(.defaultAction)
-            Spacer()
-            Menu("Merge into …") {
-                ForEach(library.speakers.filter { $0.id != speaker.id }, id: \.id) { other in
-                    Button(other.label ?? other.id) {
-                        library.merge(from: speaker.id, into: other.id)
+            HStack(spacing: 8) {
+                Menu("Merge into …") {
+                    ForEach(library.speakers.filter { $0.id != speaker.id }, id: \.id) { other in
+                        Button(other.displayName) {
+                            library.merge(from: speaker.id, into: other.id)
+                        }
                     }
                 }
+                .fixedSize()
+                .help("Same person under two identities? Move everything to the other speaker.")
+                Spacer()
+                Button(role: .destructive) {
+                    _ = library.deleteSpeakerIfEmpty(speaker.id)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .disabled(segCount > 0)
+                .help(segCount > 0
+                      ? "Can only be deleted when no segments reference this speaker (\(segCount) present, merge first)"
+                      : "Remove speaker and voice data")
             }
-            .frame(maxWidth: 220)
-            Button(role: .destructive) {
-                library.deleteSpeakerIfEmpty(speaker.id)
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .disabled(segCount > 0)
-            .help(segCount > 0
-                  ? "Can only be deleted when no segments reference this speaker (\(segCount) present — merge first)"
-                  : "Remove speaker and embeddings")
         }
         .padding(.vertical, 8)
     }
 
+    private var sampleQuotes: some View {
+        let samples = library.sampleSegments(for: speaker.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("What this speaker says")
+                .font(.headline)
+                .padding(.horizontal)
+            if samples.isEmpty {
+                Text("No segments yet.")
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(samples.enumerated()), id: \.element.id) { idx, seg in
+                        Button {
+                            library.openRecording(seg.recordingId, jumpToSec: seg.startSec)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("\u{201C}\(seg.text)\u{201D}")
+                                    .font(.callout)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(3)
+                                    .multilineTextAlignment(.leading)
+                                Text("\(library.recordings.first { $0.id == seg.recordingId }?.title ?? "Recording") · \(formatDuration(seg.startSec))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .background(idx.isMultiple(of: 2) ? Color.clear : Color.secondary.opacity(0.05))
+                    }
+                }
+                .background(Color(nsColor: .controlBackgroundColor))
+                .cornerRadius(6)
+                .padding(.horizontal)
+            }
+        }
+    }
+
     private var metadataList: some View {
         Form {
-            LabeledContent("Segmente") { Text("\(library.segmentCount(speakerId: speaker.id))") }
-            LabeledContent("Sprechzeit") { Text(formatDuration(library.speechTime(speakerId: speaker.id))) }
+            LabeledContent("Segments") { Text("\(library.segmentCount(speakerId: speaker.id))") }
+            LabeledContent("Speech time") { Text(formatDuration(library.speechTime(speakerId: speaker.id))) }
             LabeledContent("Created") { Text(speaker.createdAt, format: .dateTime) }
         }
         .formStyle(.grouped)
@@ -108,7 +158,7 @@ struct SpeakerDetailView: View {
                                 Circle()
                                     .fill(SpeakerColors.color(for: entry.speaker.id))
                                     .frame(width: 8, height: 8)
-                                Text(entry.speaker.label ?? "Unnamed-\(String(entry.speaker.id.suffix(6)))")
+                                Text(entry.speaker.displayName)
                                     .font(.caption)
                                 Spacer()
                                 Text(String(format: "%.3f", entry.similarity))
@@ -180,7 +230,7 @@ struct SpeakerDetailView: View {
                                         .font(.body.weight(.medium))
                                         .foregroundStyle(.primary)
                                     HStack(spacing: 8) {
-                                        Text(item.recording.createdAt, style: .date)
+                                        Text(item.recording.createdAt, format: .dateTime.year().month().day())
                                         Text("·")
                                         Text(item.recording.language.uppercased())
                                         Text("·")

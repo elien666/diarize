@@ -37,7 +37,7 @@ struct DiarizeAppMain: App {
                 .environmentObject(permissions)
                 .environmentObject(autoMode)
                 .environmentObject(cleanup)
-                .frame(minWidth: 1000, minHeight: 600)
+                .frame(minWidth: 1100, minHeight: 640)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     // Re-check after the user returns from System Settings.
                     permissions.refresh()
