@@ -35,6 +35,8 @@ final class StatusBarController {
                 self?.updateIcon(isRecording: isRecording)
             }
             .store(in: &cancellables)
+
+        setWindow(window)
     }
 
     private func updateIcon(isRecording: Bool) {
@@ -44,14 +46,19 @@ final class StatusBarController {
         statusItem.button?.image = image
     }
 
+    func setWindow(_ window: NSWindow) {
+        mainWindow = window
+    }
+
     private func handleClick() {
-        guard let window = mainWindow else { return }
-        if window.isVisible {
+        if let window = mainWindow, window.isVisible {
             window.orderOut(nil)
             NSApplication.shared.setActivationPolicy(.accessory)
         } else {
+            // The window may have been closed (⌘W / red button) and released;
+            // asking SwiftUI to open it recreates or re-fronts it either way.
             NSApplication.shared.setActivationPolicy(.regular)
-            window.makeKeyAndOrderFront(nil)
+            MainWindow.open()
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }

@@ -617,7 +617,7 @@ final class LibraryViewModel: ObservableObject {
     private nonisolated static func runPipeline(
         config: AppConfig,
         store: SpeakerStore,
-        progress: ProgressReporter,
+        progress: DiarizeCore.ProgressReporter,
         audioURL: URL,
         title: String?
     ) async throws -> TranscribeOutput {
@@ -780,11 +780,11 @@ final class LibraryViewModel: ObservableObject {
     }
 }
 
-private final class SilentProgress: ProgressReporter, @unchecked Sendable {
+private final class SilentProgress: DiarizeCore.ProgressReporter, @unchecked Sendable {
     func step(_ message: String) {}
 }
 
-private final class AppProgress: ProgressReporter, @unchecked Sendable {
+private final class AppProgress: DiarizeCore.ProgressReporter, @unchecked Sendable {
     let handler: @Sendable (String) -> Void
     init(_ handler: @escaping @Sendable (String) -> Void) { self.handler = handler }
     func step(_ message: String) { handler(message) }

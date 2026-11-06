@@ -2,8 +2,20 @@ import AppKit
 import SwiftUI
 import DiarizeCore
 
+/// Keeps the app alive (menu-bar icon, recording) when the last window closes.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Dock-icon click with no visible window brings the window back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { MainWindow.open() }
+        return true
+    }
+}
+
 @main
 struct DiarizeAppMain: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var library = LibraryViewModel()
     @StateObject private var permissions = PermissionsManager()
     @StateObject private var autoMode = AutoModeController()
@@ -19,7 +31,7 @@ struct DiarizeAppMain: App {
     }
 
     var body: some Scene {
-        WindowGroup("diarize") {
+        Window("diarize", id: MainWindow.id) {
             RootView()
                 .environmentObject(library)
                 .environmentObject(permissions)
@@ -36,8 +48,12 @@ struct DiarizeAppMain: App {
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                     library.appDidResignActive()
                 }
+                .modifier(MainWindowOpenerBridge())
                 .withHostingWindow { window in
-                    if statusBar == nil, let window {
+                    guard let window else { return }
+                    if let statusBar {
+                        statusBar.setWindow(window)
+                    } else {
                         statusBar = StatusBarController(library: library, window: window)
                     }
                 }
