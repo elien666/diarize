@@ -238,8 +238,8 @@ final class LibraryViewModel: ObservableObject {
     }
 
     /// The speaker's longest segments, the best material to recognize a voice by its words.
-    func sampleSegments(for speakerId: String, limit: Int = 3) -> [RecordingSegment] {
-        (try? store.sampleSegments(speakerId: speakerId, limit: limit)) ?? []
+    func sampleSegments(for speakerId: String, limit: Int = 3, requireAudio: Bool = false) -> [RecordingSegment] {
+        (try? store.sampleSegments(speakerId: speakerId, limit: limit, requireAudio: requireAudio)) ?? []
     }
 
     func segmentCount(speakerId: String) -> Int { (try? store.segmentCount(speakerId: speakerId)) ?? 0 }
@@ -593,6 +593,49 @@ final class LibraryViewModel: ObservableObject {
         try? store.updateSegmentSpeaker(segmentId: segmentId, speakerId: targetId)
         reload()
         rerenderRecording(containingSegmentId: segmentId)
+    }
+
+    /// Move a segment to another speaker (or a new one with `newLabel`) and move its voice
+    /// embedding along, so speaker centroids and similarities reflect the correction.
+    /// Returns what is needed to undo it.
+    @discardableResult
+    func reassignSegmentLearning(segmentId: Int64, to speakerId: String?, newLabel: String? = nil) -> ReassignSnapshot? {
+        let targetId: String
+        var created: String?
+        if let id = speakerId {
+            targetId = id
+        } else {
+            let trimmed = newLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let newSpeaker = Speaker(label: (trimmed?.isEmpty ?? true) ? nil : trimmed)
+            try? store.insertSpeaker(newSpeaker)
+            targetId = newSpeaker.id
+            created = newSpeaker.id
+        }
+        let snap = try? store.reassignSnapshot(segmentId: segmentId, createdSpeakerId: created)
+        try? store.reassignSegment(segmentId: segmentId, toSpeakerId: targetId)
+        reload()
+        rerenderRecording(containingSegmentId: segmentId)
+        return snap ?? nil
+    }
+
+    func undoReassign(_ snap: ReassignSnapshot) {
+        try? store.restoreReassign(snap)
+        reload()
+        rerenderRecording(containingSegmentId: snap.segmentId)
+    }
+
+    /// Merge and return what is needed to undo it.
+    @discardableResult
+    func mergeUndoable(from: String, into: String) -> MergeSnapshot? {
+        let snap = (try? store.mergeSnapshot(from: from, into: into)) ?? nil
+        try? store.mergeSpeakers(from: from, into: into)
+        reload()
+        return snap
+    }
+
+    func undoMerge(_ snap: MergeSnapshot) {
+        try? store.restoreMerge(snap)
+        reload()
     }
 
     /// Split a segment at the given absolute time.

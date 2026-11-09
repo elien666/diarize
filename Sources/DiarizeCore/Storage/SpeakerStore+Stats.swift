@@ -50,18 +50,47 @@ extension SpeakerStore {
     }
 
     /// Longest segments of a speaker (most useful for identifying who it is), longest first.
-    public func sampleSegments(speakerId: String, limit: Int) throws -> [RecordingSegment] {
-        try dbQueue.read { db in
-            try RecordingSegment.fetchAll(
+    public func sampleSegments(speakerId: String, limit: Int, requireAudio: Bool = false) throws -> [RecordingSegment] {
+        let playable: [String]? = requireAudio ? Array(try recordingIdsWithAudioFile()) : nil
+        return try dbQueue.read { db in
+            var sql = "SELECT * FROM recording_segments WHERE speakerId = ?"
+            var args: [DatabaseValueConvertible] = [speakerId]
+            if let playable {
+                guard !playable.isEmpty else { return [] }
+                sql += " AND recordingId IN (\(playable.map { _ in "?" }.joined(separator: ",")))"
+                args += playable
+            }
+            sql += " ORDER BY (endSec - startSec) DESC LIMIT ?"
+            args.append(max(1, limit))
+            return try RecordingSegment.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+        }
+    }
+
+    /// Recordings whose audio file still exists on disk. `audioDeletedAt` alone is not enough:
+    /// files can be missing (moved archive, manual deletion) without being marked deleted.
+    public func recordingIdsWithAudioFile() throws -> Set<String> {
+        let rows: [(String, String)] = try dbQueue.read { db in
+            try Row.fetchAll(db, sql: "SELECT id, sourcePath FROM recordings WHERE audioDeletedAt IS NULL")
+                .map { ($0["id"], $0["sourcePath"]) }
+        }
+        let fm = FileManager.default
+        return Set(rows.filter { fm.fileExists(atPath: $0.1) }.map(\.0))
+    }
+
+    /// Speakers with at least one segment in a recording whose audio file still exists.
+    public func speakerIdsWithAudio() throws -> Set<String> {
+        let playable = Array(try recordingIdsWithAudioFile())
+        guard !playable.isEmpty else { return [] }
+        return try dbQueue.read { db in
+            Set(try String.fetchAll(
                 db,
                 sql: """
-                    SELECT * FROM recording_segments
-                    WHERE speakerId = ?
-                    ORDER BY (endSec - startSec) DESC
-                    LIMIT ?
+                    SELECT DISTINCT speakerId FROM recording_segments
+                    WHERE speakerId IS NOT NULL
+                    AND recordingId IN (\(playable.map { _ in "?" }.joined(separator: ",")))
                     """,
-                arguments: [speakerId, max(1, limit)]
-            )
+                arguments: StatementArguments(playable)
+            ))
         }
     }
 

@@ -805,7 +805,9 @@ struct SegmentRow: View {
     private var speakerMenu: some View {
         Menu {
             Section("Assign to another speaker") {
-                ForEach(allSpeakers, id: \.id) { sp in
+                ForEach(allSpeakers.sorted {
+                    $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+                }, id: \.id) { sp in
                     Button {
                         onAssignSpeaker(sp.id)
                     } label: {

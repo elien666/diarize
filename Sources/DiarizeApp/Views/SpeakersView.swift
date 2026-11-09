@@ -79,7 +79,7 @@ struct SpeakersView: View {
         }
         .task(id: library.speakers.map(\.id)) { await loadMergeSuggestions() }
         .sheet(isPresented: $showMergeSheet) {
-            MergeSuggestionsSheet(pairs: $mergePairs, isPresented: $showMergeSheet)
+            ReviewQueueSheet(pairs: $mergePairs, isPresented: $showMergeSheet)
         }
         .confirmationDialog(
             "Remove \(unusedIds.count) unused speakers?",
@@ -192,97 +192,9 @@ struct SpeakersView: View {
     private func loadMergeSuggestions() async {
         let store = library.store
         let threshold = library.config.similarityThreshold
-        let pairs = await Task.detached(priority: .utility) {
-            (try? store.mergeCandidates(minSimilarity: threshold, limit: 30)) ?? []
+        mergePairs = await Task.detached(priority: .utility) {
+            ReviewQueueSheet.reviewablePairs(store: store, threshold: threshold)
         }.value
-        mergePairs = pairs
-    }
-}
-
-// MARK: - Merge suggestions sheet
-
-private struct MergeSuggestionsSheet: View {
-    @EnvironmentObject var library: LibraryViewModel
-    @Binding var pairs: [SpeakerMergeCandidate]
-    @Binding var isPresented: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Possible duplicates").font(.title3.weight(.semibold))
-                Spacer()
-                Button("Done") { isPresented = false }
-                    .keyboardShortcut(.defaultAction)
-            }
-            Text("Similar voices are only a hint. Check the recordings before merging: a wrong merge makes future voice matching worse.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-
-            if pairs.isEmpty {
-                Text("No suggestions left.").foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 120)
-            } else {
-                List {
-                    ForEach(pairs, id: \.pairId) { pair in
-                        row(pair)
-                    }
-                }
-                .listStyle(.inset)
-                .frame(minHeight: 260)
-            }
-        }
-        .padding(20)
-        .frame(minWidth: 560, minHeight: 380)
-    }
-
-    private func summary(_ speaker: Speaker) -> String {
-        let stats = library.speakerStats[speaker.id]
-        let recs = stats?.recordingCount ?? 0
-        let time = SidebarDurationFormat.string(stats?.speechTimeSec ?? 0)
-        return "\(speaker.displayName): \(recs) recording\(recs == 1 ? "" : "s"), \(time) speech"
-    }
-
-    @ViewBuilder
-    private func row(_ pair: SpeakerMergeCandidate) -> some View {
-        // Suggest keeping the named speaker, otherwise the one with more speech.
-        let keepA = (pair.a.label != nil && pair.b.label == nil)
-            || ((pair.a.label == nil) == (pair.b.label == nil)
-                && (library.speakerStats[pair.a.id]?.speechTimeSec ?? 0) >= (library.speakerStats[pair.b.id]?.speechTimeSec ?? 0))
-        let keep = keepA ? pair.a : pair.b
-        let drop = keepA ? pair.b : pair.a
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(pair.a.displayName).font(.body.weight(.medium))
-                    Image(systemName: "arrow.left.and.right").foregroundStyle(.secondary)
-                    Text(pair.b.displayName).font(.body.weight(.medium))
-                }
-                Text(summary(pair.a)).font(.caption).foregroundStyle(.secondary)
-                Text(summary(pair.b)).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            Text(String(format: "%.0f%% similar", pair.similarity * 100))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
-            Menu {
-                Button("Merge \(drop.displayName) into \(keep.displayName)") { merge(drop: drop, keep: keep) }
-                Button("Merge \(keep.displayName) into \(drop.displayName)") { merge(drop: keep, keep: drop) }
-                Divider()
-                Button("Open \(pair.a.displayName)") { library.openSpeaker(pair.a.id); isPresented = false }
-                Button("Open \(pair.b.displayName)") { library.openSpeaker(pair.b.id); isPresented = false }
-            } label: {
-                Text("Merge …")
-            }
-            .menuStyle(.button)
-            .fixedSize()
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func merge(drop: Speaker, keep: Speaker) {
-        library.merge(from: drop.id, into: keep.id)
-        pairs.removeAll { $0.a.id == drop.id || $0.b.id == drop.id }
     }
 }
 
