@@ -89,6 +89,11 @@ struct RecordingListView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer()
+                if autoMode.sessionItems.count > 1 {
+                    Button("Keep all") { autoMode.keepAll() }
+                        .controlSize(.small)
+                        .help("Keep all auto-recorded recordings and remove their review hints")
+                }
                 // Right-aligned so it doesn't shift when the recording count changes width.
                 if attentionCount > 0 {
                     attentionPill
@@ -267,7 +272,12 @@ struct RecordingRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                if let review {
+                if library.activeRecordingId == recording.id {
+                    Label("Recording now", systemImage: "record.circle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.top, 2)
+                } else if let review {
                     HStack(spacing: 8) {
                         Label("Auto-recorded", systemImage: "wand.and.stars")
                             .font(.caption)

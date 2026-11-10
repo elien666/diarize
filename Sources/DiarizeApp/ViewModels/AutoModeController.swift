@@ -210,6 +210,11 @@ final class AutoModeController: ObservableObject {
         sessionItems.removeAll { $0.recordingId == recordingId }
     }
 
+    /// "Keep all" — clear every pending review hint; recordings stay in the library.
+    func keepAll() {
+        sessionItems.removeAll()
+    }
+
     /// "Delete" — permanently remove the recording (DB + WAV + transcripts) and
     /// drop it from the session list.
     func delete(_ recordingId: String) {

@@ -213,10 +213,11 @@ struct AutoModeToggle: View {
               : "Grant Microphone and Screen Recording permissions first.")
     }
 
-    /// Only shown while Auto mode is on. Missing permissions are reported in the footer;
+    /// Only shown while Auto mode is on and idle: while recording, the capture bar already says so.
+    /// Missing permissions are reported in the footer;
     /// the switch is simply disabled until they are granted.
     private var status: String? {
-        guard autoMode.isActive else { return nil }
-        return library.isRecording ? "Recording a call" : "Waiting for a call …"
+        guard autoMode.isActive, !library.isRecording else { return nil }
+        return "Waiting for a call …"
     }
 }
