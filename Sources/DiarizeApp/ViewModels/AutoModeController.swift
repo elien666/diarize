@@ -25,6 +25,17 @@ final class AutoModeController: ObservableObject {
         var id: String { recordingId }
     }
 
+    /// UserDefaults key shared with SettingsView.
+    enum Defaults {
+        static let discardDictation = "autoDiscardDictation"
+    }
+
+    /// Discard dictations automatically. Defaults to on when never touched.
+    static var discardDictation: Bool {
+        UserDefaults.standard.object(forKey: Defaults.discardDictation) == nil
+            || UserDefaults.standard.bool(forKey: Defaults.discardDictation)
+    }
+
     @Published var isActive = false
     @Published private(set) var sessionItems: [SessionItem] = []
 
@@ -40,6 +51,9 @@ final class AutoModeController: ObservableObject {
 
     /// recordingId of the capture this controller started (nil = none of ours live).
     private var autoStartedRecordingId: String?
+    /// Recordings started by detection (not the manual button) — only these are
+    /// candidates for dictation clean-up.
+    private var detectedRecordingIds: Set<String> = []
     /// Debounce counters so a single noisy sample can't flip start/stop.
     private var positiveSamples = 0
     private var negativeSamples = 0
@@ -99,7 +113,9 @@ final class AutoModeController: ObservableObject {
         guard isActive, let library, let permissions else { return }
 
         let myPID = getpid()
-        let foreign = MicUsageMonitor.foreignMicInputCount(excludingPID: myPID)
+        let foreign = MicUsageMonitor.foreignMicInputCount(
+            excludingPID: myPID, ignoringDictation: Self.discardDictation
+        )
 
         if autoStartedRecordingId == nil {
             // Looking to START. Don't trigger if we (or anyone via library) are
@@ -131,7 +147,7 @@ final class AutoModeController: ObservableObject {
     }
 
     private func autoStart() {
-        startRecording()
+        startRecording(detected: true)
     }
 
     private func autoStop() {
@@ -143,7 +159,7 @@ final class AutoModeController: ObservableObject {
     /// Shared start path for both auto-detection and the manual button. Tracks the
     /// new recording as the auto-started one so it appears in the session list and
     /// is eligible for auto-stop.
-    private func startRecording() {
+    private func startRecording(detected: Bool = false) {
         guard let library, !library.isRecording else { return }
         positiveSamples = 0
         let micUID = UserDefaults.standard.string(forKey: "selectedMicDeviceUID")
@@ -153,6 +169,7 @@ final class AutoModeController: ObservableObject {
         )
         guard let id = library.activeRecordingId else { return }
         autoStartedRecordingId = id
+        if detected { detectedRecordingIds.insert(id) }
         negativeSamples = 0
         let item = SessionItem(
             recordingId: id,
@@ -187,6 +204,27 @@ final class AutoModeController: ObservableObject {
             if rec.processingState == .done || rec.processingState == .empty {
                 sessionItems[index].speakers = distinctSpeakers(for: id, library: library)
             }
+        }
+        discardDictations(library: library)
+    }
+
+    /// A detected recording that finished with at most one speaker never had a
+    /// conversation: it is a dictation (the mic caught someone typing by voice).
+    /// Remove it with audio and transcript. Skipped when the setting is off.
+    private func discardDictations(library: LibraryViewModel) {
+        guard Self.discardDictation else { return }
+        let dictations = sessionItems.filter { item in
+            detectedRecordingIds.contains(item.recordingId)
+                && item.state == .done
+                && item.speakers.count <= 1
+        }
+        guard !dictations.isEmpty else { return }
+        let ids = dictations.map(\.recordingId)
+        ids.forEach { detectedRecordingIds.remove($0) }
+        // Defer: this runs inside a `library.$recordings` sink, and deleting reloads
+        // that same property.
+        Task { @MainActor [weak self] in
+            for id in ids { self?.delete(id) }
         }
     }
 

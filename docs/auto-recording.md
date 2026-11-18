@@ -24,6 +24,15 @@ diarize polls the system every couple of seconds:
 
 Each captured recording uses the same [stereo channel separation](recording.md#mic--system-audio-together-stereo-separation) as a normal mic + system recording.
 
+## Dictation
+
+Dictation apps (Wispr Flow, Superwhisper, MacWhisper and similar) also take the microphone, but they are not calls. With **Discard dictations automatically** on (Settings → Auto Recording, default on), diarize:
+
+- ignores known dictation apps when deciding whether to start, and
+- deletes an auto-started recording (audio and transcript) once analysis shows only one speaker.
+
+Recordings you start with the manual button are never deleted this way. Turn the setting off to keep everything.
+
 ## Manual override
 
 Detection can occasionally miss or misfire. The big **Start Recording / Stop Recording** button lets you take over at any time — start a recording the detector didn't catch, or stop one it didn't end.

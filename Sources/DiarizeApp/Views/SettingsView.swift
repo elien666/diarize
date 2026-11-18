@@ -15,6 +15,8 @@ struct SettingsView: View {
     @State private var backfilling = false
     @State private var showRestartAlert = false
 
+    @AppStorage(AutoModeController.Defaults.discardDictation)
+    private var discardDictation = true
     @AppStorage(AudioCleanupController.Defaults.autoCleanEnabled)
     private var autoCleanEnabled = true
     @AppStorage(AudioCleanupController.Defaults.audioRetentionDays)
@@ -31,6 +33,13 @@ struct SettingsView: View {
                 .onChange(of: selectedLanguage) { _, lang in
                     library.updateDefaultLanguage(lang)
                 }
+            }
+
+            Section("Auto Recording") {
+                Toggle("Discard dictations automatically", isOn: $discardDictation)
+                Text("Ignores dictation apps (Wispr Flow, Superwhisper, MacWhisper …) and deletes auto-recordings that contain only one speaker.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Privacy") {

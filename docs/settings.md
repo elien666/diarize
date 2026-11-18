@@ -6,6 +6,10 @@ The app's **Settings** window groups everything you can tune, plus a few mainten
 
 - **Default Language** — Auto-detect, English, or Deutsch. Used for new recordings unless you override it per recording in the [recording options](recording.md#starting-a-recording).
 
+## Auto Recording
+
+**Discard dictations automatically** (default on) skips dictation apps when detecting calls and deletes auto-recordings that contain only one speaker. See [Auto Recording → Dictation](auto-recording.md#dictation).
+
 ## Privacy
 
 - **Suggest deleting old audio automatically** — when on (the default), diarize periodically offers to delete audio older than your retention window. Transcripts are always kept. See [Privacy & Data](privacy.md#automatic-clean-up-of-old-audio).

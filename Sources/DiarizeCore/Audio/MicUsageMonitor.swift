@@ -40,6 +40,27 @@ public enum MicUsageMonitor {
         "com.apple.accessibility.AXVisualSupportAgent",
     ]
 
+    /// Bundle IDs of third-party dictation / voice-typing apps. They grab the mic only
+    /// while the user dictates text into some other app, so they are not a call.
+    /// Matched case-insensitively as exact ID or prefix (helper processes carry
+    /// suffixes like `.helper`).
+    public static let dictationBundleIDPrefixes: [String] = [
+        "com.electron.wispr-flow",   // Wispr Flow
+        "com.wispr",
+        "com.superwhisper",          // Superwhisper
+        "com.goodsnooze.macwhisper", // MacWhisper
+        "com.prakashjoshipax.voiceink", // VoiceInk
+        "com.aquavoice",             // Aqua Voice
+        "com.talonvoice",            // Talon
+        "com.nuance.dragon",         // Dragon
+        "com.apple.dictation",
+    ]
+
+    static func isDictationBundle(_ bundle: String) -> Bool {
+        let b = bundle.lowercased()
+        return dictationBundleIDPrefixes.contains { b == $0 || b.hasPrefix($0 + ".") }
+    }
+
     /// Number of *foreign* processes (PID ≠ `excludingPID`) that are currently
     /// running audio input, i.e. capturing from a microphone — excluding always-on
     /// system daemons (see `ignoredInputBundleIDs`). Pass `getpid()` to exclude
@@ -48,7 +69,10 @@ public enum MicUsageMonitor {
     /// Returns `nil` when the per-process input API is unavailable (< macOS 14.4),
     /// in which case callers should fall back to `defaultInputIsRunningSomewhere()`
     /// for start detection and disable foreign-process-based auto-stop.
-    public static func foreignMicInputCount(excludingPID excluded: pid_t) -> Int? {
+    ///
+    /// With `ignoringDictation`, known dictation apps (see `dictationBundleIDPrefixes`)
+    /// are not counted either.
+    public static func foreignMicInputCount(excludingPID excluded: pid_t, ignoringDictation: Bool = false) -> Int? {
         guard #available(macOS 14.4, *) else { return nil }
         guard let processes = processObjectIDs() else { return nil }
 
@@ -56,7 +80,10 @@ public enum MicUsageMonitor {
         for process in processes {
             guard isRunningInput(process) else { continue }
             guard let pid = pid(of: process), pid != excluded else { continue }
-            if let bundle = bundleID(of: process), ignoredInputBundleIDs.contains(bundle) { continue }
+            if let bundle = bundleID(of: process) {
+                if ignoredInputBundleIDs.contains(bundle) { continue }
+                if ignoringDictation, isDictationBundle(bundle) { continue }
+            }
             count += 1
         }
         return count
